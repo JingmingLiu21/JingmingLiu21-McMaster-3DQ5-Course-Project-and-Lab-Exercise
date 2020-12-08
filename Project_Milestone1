@@ -1,0 +1,1797 @@
+/*
+Copyright by Henry Ko, Jingming Liu and Nicola Nicolici
+Department of Electrical and Computer Engineering
+McMaster University
+Ontario, Canada
+*/
+
+`timescale 1ns/100ps
+`ifndef DISABLE_DEFAULT_NET
+`default_nettype none
+`endif
+
+`include "define_state.h"
+
+module milestone1(
+		/////// board clocks                      ////////////
+		input logic CLOCK_50_I,                   // 50 MHz clock
+		input logic resetn,
+		input logic milestone_one_start,
+		input logic [15:0]SRAM_read_data,
+		
+		output logic milestone_one_stop,
+		output logic[17:0] M1_SRAM_address,
+		output logic M1_SRAM_we_n,
+		output logic[15:0] M1_SRAM_write_data
+);
+	
+
+//milestone1
+//define milestone 1 state
+M1_state_type M1_state;
+
+logic[15:0] D_SRAM_data[2:0];
+logic read_flag;
+
+//shift register for U and V (8 bit unsigned)
+logic [7:0] USR [5:0];
+logic [7:0] VSR [5:0];
+
+// Registers storing interpolation data // Y is unsignde 8 bit , U and V is signed 16 bit ( for ease of calculation all the regesiers is 32 bit)
+
+logic [31:0] Yp_even;
+logic [31:0] Yp_odd;
+
+logic [31:0] Up_even;
+logic [31:0] Up_odd;
+logic [31:0] Vp_even;
+logic [31:0] Vp_odd;
+
+// Registers storing CSC data RGB are 32 bit signed then convert to 8 bit !!unsigned !!!by scaling (dismiss the leaset significant bit)
+logic [31:0] R_even_temp;
+logic [31:0] R_odd_temp;
+logic [31:0] G_even_temp;
+logic [31:0] G_odd_temp;
+logic [31:0] B_even_temp;
+logic [31:0] B_odd_temp;
+
+logic [7:0] G_odd_buf;
+logic [7:0] B_odd_buf;
+logic [7:0] R_even_buf;
+logic [7:0] G_even_buf;
+logic [7:0] B_even_buf;
+
+logic [31:0] Mul_RGB_even;
+logic [31:0] Mul_RGB_odd;
+
+// for MAC UNIT FOR CSC_EVEN !!!Signed !!!
+logic [31:0] CEC;// coff of even color
+logic [31:0] op1; // selected Y or U or V (even value) !!!Signed !!!
+logic [7:0] Result_R_even;
+logic [7:0] Result_G_even;
+logic [7:0] Result_B_even;
+logic [31:0]YUV_even_selected;
+// for MAC UNIT FOR CSC_ODD !!!Signed !!!
+logic [31:0] COC;// coff of odd color
+logic [31:0] op2;// selected Y or U or V (odd value) !!!Signed !!!
+logic [31:0]YUV_odd_selected;
+logic [7:0] Result_R_odd;
+logic [7:0] Result_G_odd;
+logic [7:0] Result_B_odd;
+
+
+//SRAM_Address_for milestone 1
+logic[17:0] M1_SRAM_address_Y;
+logic[17:0] M1_SRAM_address_U;
+logic[17:0] M1_SRAM_address_V;
+logic[17:0] M1_SRAM_address_RGB; // for write date to rgb segement 
+
+
+// storing the previous value of result for U;v odd interpolation equation signed
+logic [31:0] Up_prev_odd;
+logic [31:0] Vp_prev_odd;
+// indentify new row
+
+
+// regesiter storing the multiplier data !!!Signed !!!
+// mult for U and V interpolation
+logic [31:0] mult1;
+logic [31:0] mult2;
+//mult for CSC
+logic [31:0] mult3;
+logic [31:0] mult4;
+
+// line_counter to keep tracking of how many Y data are . for go to lead out state
+logic [9:0] Ydata_counter;
+// line_counter to keep tracking of how many lead out states are . for going to a new row
+logic [9:0] row_counter;
+// lead out state counter to track how many lead out states
+logic [4:0] lo_state_counter;
+
+
+// operands for multipliers
+
+// for MAC UNIT FOR U !!!Signed !!!
+logic [31:0] CU; // coff OF U
+logic [31:0] U; 
+// for MAC UNIT FOR V !!!Signed !!!
+logic [31:0] CV;// coff
+logic [31:0] V;
+
+// regesiter for storing the result of Y' U' ,v' factors !!!Signed !!!
+logic [31:0] Result_U_odd_long;
+logic [31:0] Result_V_odd_long;
+
+logic [31:0] Result_U_odd;
+logic [31:0] Result_V_odd;
+
+
+
+always_ff @ (posedge CLOCK_50_I or negedge resetn) begin
+	if (~resetn) begin
+		M1_state <= M1_IDLE;
+		
+		//initialize milestone1 varaibles
+		D_SRAM_data[2] <= 16'd0;
+		D_SRAM_data[1] <= 16'd0;
+		D_SRAM_data[0] <= 16'd0;
+		
+			USR[5] <= 8'd0;
+			USR[4] <= 8'd0;
+			USR[3] <= 8'd0;
+			USR[2] <= 8'd0;
+			USR[1] <= 8'd0;
+			USR[0] <= 8'd0;
+			VSR[5] <= 8'd0;
+			VSR[4] <= 8'd0;
+			VSR[3] <= 8'd0;
+			VSR[2] <= 8'd0;
+			VSR[1] <= 8'd0;
+			VSR[0] <= 8'd0;
+		
+		Yp_even <=32'd0;
+		Yp_odd <=32'd0;
+		Up_even <=32'd0;
+		Vp_even <=32'd0;
+		Up_odd <=32'd0;
+		Vp_odd <=32'd0;
+		
+		mult1 <= 32'd0;
+		mult2 <= 32'd0;
+		mult3 <= 32'd0;
+		mult4 <= 32'd0;
+		
+		G_odd_buf<=8'd0;
+		B_odd_buf<=8'd0;
+		R_even_buf<=8'd0;
+		G_even_buf<=8'd0;
+		B_even_buf<=8'd0;
+		
+		M1_SRAM_address <= 18'd0;
+		M1_SRAM_address_Y<= 18'd0;
+		M1_SRAM_address_U<= 18'd38400;
+		M1_SRAM_address_V<= 18'd57600;
+		M1_SRAM_address_RGB <= 18'd146944;
+		read_flag <= 1'd0;
+		Ydata_counter <= 9'd0;
+		lo_state_counter <=4'd0;
+		row_counter <= 1'b0;
+		// initialize for multiplier
+		U<= 32'd0;
+		V<= 32'd0;
+		
+		Up_prev_odd <=32'd0;
+		Vp_prev_odd <= 32'd0;
+		
+		R_even_temp<=32'd0;
+		R_odd_temp<=32'd0;
+		G_even_temp<=32'd0;
+		G_odd_temp<=32'd0;
+		B_even_temp<=32'd0;
+		B_odd_temp<=32'd0;
+		
+		YUV_odd_selected <= 32'd0;
+		YUV_even_selected <= 32'd0;
+		
+	end else begin
+	
+		// m1_sate
+		case(M1_state)
+				M1_IDLE:begin
+					if(row_counter == 9'd240)begin	
+						milestone_one_stop <=1'b1;
+						M1_state <=M1_IDLE;
+					end 
+					if(milestone_one_start == 1'b1)begin
+						M1_state <=S_WAIT_NEW_PIXEL_ROW;
+						//pre_pare for read
+						M1_SRAM_address <=M1_SRAM_address_V;
+						M1_SRAM_we_n <= 1'b1;
+					end else begin
+					M1_state <=M1_IDLE;
+					end
+				end
+				// lead_in states 0
+				S_WAIT_NEW_PIXEL_ROW:begin  
+				// Start a new frame
+				//Provide address for data 1
+					M1_SRAM_address <=M1_SRAM_address_V;
+					M1_SRAM_address_V<= (M1_SRAM_address_V+18'h1);
+					M1_state <= S_NEW_PIXEL_ROW_DELAY_1;		
+					// $$$NEED ATTENTION!!! 
+					//check initialize everything
+					lo_state_counter <=7'd0;
+					Ydata_counter <= 9'd0;
+					
+					D_SRAM_data[2] <= 16'd0;
+					D_SRAM_data[1] <= 16'd0;
+					D_SRAM_data[0] <= 16'd0;
+					
+					USR[5] <= 8'd0;
+					USR[4] <= 8'd0;
+					USR[3] <= 8'd0;
+					USR[2] <= 8'd0;
+					USR[1] <= 8'd0;
+					USR[0] <= 8'd0;
+					VSR[5] <= 8'd0;
+					VSR[4] <= 8'd0;
+					VSR[3] <= 8'd0;
+					VSR[2] <= 8'd0;
+					VSR[1] <= 8'd0;
+					VSR[0] <= 8'd0;
+					
+					Yp_even <=32'd0;
+					Yp_odd <=32'd0;
+					
+					Up_even <=32'd0;
+					Vp_even <=32'd0;
+					Up_odd <=32'd0;
+					Vp_odd <=32'd0;
+					Up_even <=32'd0;
+					
+					Up_prev_odd <=32'd0;
+					Vp_prev_odd <= 32'd0;
+					
+					R_even_temp<=32'd0;
+					R_odd_temp<=32'd0;
+					G_even_temp<=32'd0;
+					G_odd_temp<=32'd0;
+					B_even_temp<=32'd0;
+					B_odd_temp<=32'd0;
+					
+					G_odd_buf<=8'd0;
+					B_odd_buf<=8'd0;
+					R_even_buf<=8'd0;
+					G_even_buf<=8'd0;
+					B_even_buf<=8'd0;
+					
+					YUV_odd_selected <= 32'd0;
+					YUV_even_selected <= 32'd0;
+					
+					mult1 <= 32'd0;
+					mult2 <= 32'd0;
+					mult3 <= 32'd0;
+					mult4 <= 32'd0;
+					
+			end
+			
+			
+			// lead_in states START HERE
+			S_NEW_PIXEL_ROW_DELAY_1:begin
+				M1_SRAM_address_U<= (M1_SRAM_address_U+18'h1);
+				M1_SRAM_address <=M1_SRAM_address_U;
+				M1_state <= S_NEW_PIXEL_ROW_DELAY_2;
+			end
+			
+			S_NEW_PIXEL_ROW_DELAY_2:begin
+				M1_SRAM_address_Y<= (M1_SRAM_address_Y+18'h1);
+				M1_SRAM_address <=M1_SRAM_address_Y;
+				M1_state <= S_NEW_PIXEL_ROW_DELAY_3;
+			end
+			
+			S_NEW_PIXEL_ROW_DELAY_3:begin
+				M1_SRAM_address_V<= (M1_SRAM_address_V+18'h1);
+				M1_SRAM_address <=M1_SRAM_address_V;
+				D_SRAM_data[2]<= SRAM_read_data;
+				M1_state <= S_NEW_PIXEL_ROW_DELAY_4;
+			end
+			
+			S_NEW_PIXEL_ROW_DELAY_4:begin
+				M1_SRAM_address_U<= (M1_SRAM_address_U+18'h1);
+				M1_SRAM_address <=M1_SRAM_address_U;
+				D_SRAM_data[1]<=SRAM_read_data;
+				
+				M1_state <= S_NEW_PIXEL_ROW_DELAY_5;
+			end
+			
+			S_NEW_PIXEL_ROW_DELAY_5:begin
+				D_SRAM_data[0]<=SRAM_read_data;
+				Ydata_counter <= Ydata_counter + 9'd2;
+				USR[0] <=D_SRAM_data[1][15:8];//U'0
+				USR[1] <=D_SRAM_data[1][15:8];
+				USR[2] <=D_SRAM_data[1][15:8];
+				
+				VSR[0] <=D_SRAM_data[2][15:8];//V'0
+				VSR[1] <=D_SRAM_data[2][15:8];
+				VSR[2] <=D_SRAM_data[2][15:8];
+					
+				M1_state <= S_NEW_PIXEL_ROW_DELAY_6;
+			end
+			
+			S_NEW_PIXEL_ROW_DELAY_6:begin
+				D_SRAM_data[2]<=SRAM_read_data;
+				Yp_even <= {24'd0,D_SRAM_data[0][15:8]};// Y'0
+				Yp_odd <= {24'd0,D_SRAM_data[0][7:0]}; // Y'1
+				
+				USR[3] <=D_SRAM_data[1][7:0];//U1
+				VSR[3] <=D_SRAM_data[2][7:0];//V1
+				M1_state <= S_NEW_PIXEL_ROW_DELAY_7;
+			end
+			
+			S_NEW_PIXEL_ROW_DELAY_7:begin
+				D_SRAM_data[1]<=SRAM_read_data;
+				Up_prev_odd <= 32'd128;
+				Vp_prev_odd <= 32'd128;
+				M1_state <= S_NEW_PIXEL_ROW_DELAY_8;
+			end
+			
+			S_NEW_PIXEL_ROW_DELAY_8:begin
+				mult1 <= 32'd21;
+				mult2 <= 32'd21;
+				mult3 <= 32'd76284;
+				
+				M1_SRAM_address_Y<= (M1_SRAM_address_Y+18'h1);
+				M1_SRAM_address <=M1_SRAM_address_Y;
+				
+				USR[4] <= D_SRAM_data[1][15:8];//U2
+				VSR[4] <= D_SRAM_data[2] [15:8];//V2
+				USR[5] <= D_SRAM_data[1][7:0];//U3
+				VSR[5] <= D_SRAM_data[2] [7:0];//V3
+				
+				// INTERPOLATION
+				U <= {24'd0,USR[1]};
+				V <= {24'd0,VSR[1]};
+				
+				Up_prev_odd <= Up_prev_odd + Result_U_odd_long;
+				Vp_prev_odd <= Vp_prev_odd + Result_V_odd_long;
+				
+				//csc
+				YUV_even_selected <= Yp_even - 32'd16; // Y0 -16 
+				
+				M1_state <= S_NEW_PIXEL_ROW_DELAY_9;
+			end
+			
+			S_NEW_PIXEL_ROW_DELAY_9:begin
+				mult1 <= 32'd52;
+				mult2 <= 32'd52; 
+				mult3 <= 32'd104595;
+				M1_SRAM_address_V<= (M1_SRAM_address_V+18'h1);
+				M1_SRAM_address <= M1_SRAM_address_V;
+				//Opearte Shift Registers
+				USR[5]<=USR[0];
+				USR[4]<=USR[5];
+				USR[3]<=USR[4];
+				USR[2]<=USR[3];
+				USR[1]<=USR[2];
+				USR[0]<=USR[1];
+				
+				VSR[5]<=VSR[0];
+				VSR[4]<=VSR[5];
+				VSR[3]<=VSR[4];
+				VSR[2]<=VSR[3];
+				VSR[1]<=VSR[2];
+				VSR[0]<=VSR[1];
+				
+				Up_even <= {24'd0,USR[0]}; // U0
+				Vp_even <= {24'd0,VSR[0]}; // v0
+				
+				// INTERPOLATION
+				U <= {24'd0,USR[1]};
+				V <= {24'd0,VSR[1]};
+				Up_prev_odd <= Up_prev_odd + Result_U_odd_long;
+				Vp_prev_odd <= Vp_prev_odd + Result_V_odd_long;
+				
+				//csc
+				YUV_even_selected <= {24'd0,VSR[0]} - 32'd128;
+				
+				R_even_temp <= Mul_RGB_even;
+				G_even_temp <= Mul_RGB_even;
+				B_even_temp <= Mul_RGB_even;
+				 
+				M1_state <= S_NEW_PIXEL_ROW_DELAY_10;
+			end
+			S_NEW_PIXEL_ROW_DELAY_10:begin
+				mult1 <= 32'd159;
+				mult2 <= 32'd159; 
+				mult3 <= 32'd25624;
+				
+				M1_SRAM_address_U<= (M1_SRAM_address_U+18'h1);
+				M1_SRAM_address <= M1_SRAM_address_U;
+				
+				//Opearte Shift Registers
+				USR[5]<=USR[0];
+				USR[4]<=USR[5];
+				USR[3]<=USR[4];
+				USR[2]<=USR[3];
+				USR[1]<=USR[2];
+				USR[0]<=USR[1];
+				
+				VSR[5]<=VSR[0];
+				VSR[4]<=VSR[5];
+				VSR[3]<=VSR[4];
+				VSR[2]<=VSR[3];
+				VSR[1]<=VSR[2];
+				VSR[0]<=VSR[1];
+				
+				// INTERPOLATION
+				U <= {24'd0,USR[1]};
+				V <= {24'd0,VSR[1]};
+				Up_prev_odd <= Up_prev_odd - Result_U_odd_long;
+				Vp_prev_odd <= Vp_prev_odd - Result_V_odd_long;
+				//  CSC
+				YUV_even_selected <= Up_even - 32'd128;
+				
+				R_even_temp <= R_even_temp + Mul_RGB_even;
+				
+				M1_state <= S_NEW_PIXEL_ROW_DELAY_11;
+			end
+			S_NEW_PIXEL_ROW_DELAY_11:begin
+				mult1 <= 32'd159;
+				mult2 <= 32'd159; 
+				mult3 <= 32'd53281;// $$$NEED ATTENTION!!!
+				D_SRAM_data[0] <= SRAM_read_data;
+				
+				//Opearte Shift Registers
+				USR[5]<=USR[0];
+				USR[4]<=USR[5];
+				USR[3]<=USR[4];
+				USR[2]<=USR[3];
+				USR[1]<=USR[2];
+				USR[0]<=USR[1];
+				
+				VSR[5]<=VSR[0];
+				VSR[4]<=VSR[5];
+				VSR[3]<=VSR[4];
+				VSR[2]<=VSR[3];
+				VSR[1]<=VSR[2];
+				VSR[0]<=VSR[1];
+				
+				// INTERPOLATION
+				U <= {24'd0,USR[1]};
+				V <= {24'd0,VSR[1]};
+				Up_prev_odd <= Up_prev_odd + Result_U_odd_long;
+				Vp_prev_odd <= Vp_prev_odd + Result_V_odd_long;
+				// CSC
+				YUV_even_selected <= Vp_even - 32'd128;
+				G_even_temp <= G_even_temp - Mul_RGB_even;
+				// update y counter
+				Ydata_counter <= Ydata_counter + 9'd2;
+				
+				M1_state <= S_NEW_PIXEL_ROW_DELAY_12;	
+			end
+			
+			S_NEW_PIXEL_ROW_DELAY_12:begin
+				mult1 <= 32'd52;// $$$NEED ATTENTION!!!
+				mult2 <= 32'd52; // $$$NEED ATTENTION!!!
+				mult3 <= 32'd132251;
+				D_SRAM_data[2] <= SRAM_read_data;
+				
+				Yp_even <= {24'd0,D_SRAM_data[0][15:8]};// Y'2
+				
+				//Opearte Shift Registers
+				USR[5]<=USR[0];
+				USR[4]<=USR[5];
+				USR[3]<=USR[4];
+				USR[2]<=USR[3];
+				USR[1]<=USR[2];
+				USR[0]<=USR[1];
+				
+				VSR[5]<=VSR[0];
+				VSR[4]<=VSR[5];
+				VSR[3]<=VSR[4];
+				VSR[2]<=VSR[3];
+				VSR[1]<=VSR[2];
+				VSR[0]<=VSR[1];
+				
+				// INTERPOLATION
+				U <= {24'd0,USR[1]};
+				V <= {24'd0,VSR[1]};
+				Up_prev_odd <= Up_prev_odd + Result_U_odd_long;
+				Vp_prev_odd <= Vp_prev_odd + Result_V_odd_long;
+				// CSC
+				YUV_even_selected <= Up_even - 32'd128;
+				G_even_temp <= G_even_temp - Mul_RGB_even;
+				M1_state <= S_NEW_PIXEL_ROW_DELAY_13;	
+			end
+			
+			S_NEW_PIXEL_ROW_DELAY_13:begin
+				mult1 <= 32'd21;
+				mult2 <= 32'd21;
+				D_SRAM_data[1] <= SRAM_read_data;
+				//Opearte Shift Registers
+				USR[5]<=USR[0];
+				USR[4]<=USR[5];
+				USR[3]<=USR[4];
+				USR[2]<=USR[3];
+				USR[1]<=USR[2];
+				USR[0]<=USR[1];
+				
+				VSR[5]<=VSR[0];
+				VSR[4]<=VSR[5];
+				VSR[3]<=VSR[4];
+				VSR[2]<=VSR[3];
+				VSR[1]<=VSR[2];
+				VSR[0]<=VSR[1];
+				
+				// INTERPOLATION
+				U <= {24'd0,USR[1]};
+				V <= {24'd0,VSR[1]};
+				Up_prev_odd <= Up_prev_odd - Result_U_odd_long;
+				Vp_prev_odd <= Vp_prev_odd - Result_V_odd_long;
+				// CSC
+				B_even_temp <= B_even_temp + Mul_RGB_even;
+				//SRAM_WRITE_RGB
+				M1_state <= S_NEW_PIXEL_ROW_DELAY_14;
+				// write R0,G0
+				M1_SRAM_we_n <= 1'b0;
+				M1_SRAM_address_RGB <= (M1_SRAM_address_RGB + 18'h1);
+				M1_SRAM_address <= M1_SRAM_address_RGB;
+				M1_SRAM_write_data <= {{Result_R_even},{Result_G_even}};
+			end
+			
+			S_NEW_PIXEL_ROW_DELAY_14:begin
+				// pre_pare_to read
+				M1_SRAM_we_n <= 1'b1;
+				//set up coff
+				mult1 <= 32'd21;
+				mult2 <= 32'd21;
+				mult3 <= 32'd76284;
+				mult4 <= 32'd76284;
+				
+
+				//Opearte Shift Registers
+				USR[5]<=D_SRAM_data[1][15:8];
+				USR[4]<=USR[0];
+				USR[3]<=USR[5];
+				USR[2]<=USR[4];
+				USR[1]<=USR[3];
+				USR[0]<=USR[2];
+				
+				VSR[5]<=D_SRAM_data[2][15:8];
+				VSR[4]<=VSR[0];
+				VSR[3]<=VSR[5];
+				VSR[2]<=VSR[4];
+				VSR[1]<=VSR[3];
+				VSR[0]<=VSR[2];
+				
+				Up_even <= {24'd0,USR[4]}; // U'2
+				Vp_even <= {24'd0,VSR[4]}; // V'2
+				
+				// INTERPOLATION
+				U <= {24'd0,USR[2]};
+				V <= {24'd0,VSR[2]};
+				Up_prev_odd <= Up_prev_odd + Result_U_odd_long;
+				Vp_prev_odd <= Vp_prev_odd + Result_V_odd_long;
+				//csc
+				YUV_even_selected<= Yp_even - 32'd16; // EX. Y'2
+				YUV_odd_selected <=Yp_odd- 32'd16; // EX. Y'1
+				B_even_buf <= Result_B_even;
+				M1_state <= S_NEW_PIXEL_ROW_DELAY_15;	
+			end
+			
+			S_NEW_PIXEL_ROW_DELAY_15:begin
+				mult1 <= 32'd52;
+				mult2 <= 32'd52;
+				mult3 <= 32'd104595;
+				mult4 <= 32'd104595;
+				
+				Yp_odd <= {24'd0,D_SRAM_data[0][7:0]};//Y'3
+				
+				//Opearte Shift Registers
+				USR[5]<=USR[0];
+				USR[4]<=USR[5];
+				USR[3]<=USR[4];
+				USR[2]<=USR[3];
+				USR[1]<=USR[2];
+				USR[0]<=USR[1];
+				
+				VSR[5]<=VSR[0];
+				VSR[4]<=VSR[5];
+				VSR[3]<=VSR[4];
+				VSR[2]<=VSR[3];
+				VSR[1]<=VSR[2];
+				VSR[0]<=VSR[1];
+				
+				
+				
+				// INTERPOLATION
+				U <= {24'd0,USR[1]};
+				V <= {24'd0,VSR[1]};
+				Up_odd <= Result_U_odd; // U'1
+				Vp_odd <= Result_V_odd; // V'1
+				Up_prev_odd <=  Result_U_odd_long + 32'd128 ;
+				Vp_prev_odd <=  Result_V_odd_long + 32'd128 ;
+				
+				//CSC
+				YUV_even_selected<= Vp_even - 32'd128;// EX. V'2
+				YUV_odd_selected <= Result_V_odd- 32'd128; // EX. V'1
+				
+				R_even_temp <= Mul_RGB_even;
+				G_even_temp <= Mul_RGB_even;
+				B_even_temp <= Mul_RGB_even;
+				
+				R_odd_temp <= Mul_RGB_odd;
+				G_odd_temp <= Mul_RGB_odd;
+				B_odd_temp <= Mul_RGB_odd;
+				
+				M1_state <= S_NEW_PIXEL_ROW_DELAY_16;	
+			end
+			
+			S_NEW_PIXEL_ROW_DELAY_16:begin
+				mult1 <= 32'd159;
+				mult2 <= 32'd159;
+				mult3 <= 32'd25624;
+				mult4 <= 32'd25624;
+				
+				M1_SRAM_address_Y<= (M1_SRAM_address_Y+18'h1);
+				M1_SRAM_address <= M1_SRAM_address_Y;
+				
+				//Opearte Shift Registers
+				USR[5]<=USR[0];
+				USR[4]<=USR[5];
+				USR[3]<=USR[4];
+				USR[2]<=USR[3];
+				USR[1]<=USR[2];
+				USR[0]<=USR[1];
+				
+				VSR[5]<=VSR[0];
+				VSR[4]<=VSR[5];
+				VSR[3]<=VSR[4];
+				VSR[2]<=VSR[3];
+				VSR[1]<=VSR[2];
+				VSR[0]<=VSR[1];
+				
+				//CSC
+				
+				YUV_even_selected<= Up_even - 32'd128;// EX. u'2
+				YUV_odd_selected<= Up_odd- 32'd128; // EX. u'1
+				
+				R_even_temp <= R_even_temp + Mul_RGB_even;
+				R_odd_temp <= R_odd_temp + Mul_RGB_odd;
+				
+				// INTERPOLATION
+				U <= {24'd0,USR[1]};
+				V <= {24'd0,VSR[1]};
+				Up_prev_odd <= Up_prev_odd - Result_U_odd_long;
+				Vp_prev_odd <= Vp_prev_odd - Result_V_odd_long;
+				
+				M1_state <= S_NEW_PIXEL_ROW_DELAY_17;	
+			end
+			
+			S_NEW_PIXEL_ROW_DELAY_17:begin
+				mult1 <= 32'd159;
+				mult2 <= 32'd159;
+				mult3 <= 32'd53281;
+				mult4 <= 32'd53281;
+				
+			   //Opearte Shift Registers
+				USR[5]<=USR[0];
+				USR[4]<=USR[5];
+				USR[3]<=USR[4];
+				USR[2]<=USR[3];
+				USR[1]<=USR[2];
+				USR[0]<=USR[1];
+				
+				VSR[5]<=VSR[0];
+				VSR[4]<=VSR[5];
+				VSR[3]<=VSR[4];
+				VSR[2]<=VSR[3];
+				VSR[1]<=VSR[2];
+				VSR[0]<=VSR[1];
+				
+				//CSC
+				YUV_even_selected<= Vp_even - 32'd128;// EX. v'2
+				YUV_odd_selected<= Vp_odd- 32'd128; // EX. v'1
+				
+				G_even_temp <= G_even_temp - Mul_RGB_even;
+				G_odd_temp <= G_odd_temp - Mul_RGB_odd;
+				
+				// INTERPOLATION
+				U <= {24'd0,USR[1]};
+				V <= {24'd0,VSR[1]};
+				Up_prev_odd <= Up_prev_odd + Result_U_odd_long;
+				Vp_prev_odd <= Vp_prev_odd + Result_V_odd_long; 
+				
+				// write B0,R1
+				M1_SRAM_we_n <= 1'b0;
+				M1_SRAM_address_RGB <= (M1_SRAM_address_RGB + 18'h1);
+				M1_SRAM_address <= M1_SRAM_address_RGB;
+				M1_SRAM_write_data <= {{B_even_buf},{Result_R_odd}};
+				
+				M1_state <= S_NEW_PIXEL_ROW_DELAY_18;	
+			end
+			
+			S_NEW_PIXEL_ROW_DELAY_18:begin
+				mult1 <= 32'd52;
+				mult2 <= 32'd52;
+				mult3 <= 32'd132251;
+				mult4 <= 32'd132251;
+				
+				// prepare to read
+				M1_SRAM_we_n <= 1'b1;
+				
+				 //Opearte Shift Registers
+				USR[5]<=USR[0];
+				USR[4]<=USR[5];
+				USR[3]<=USR[4];
+				USR[2]<=USR[3];
+				USR[1]<=USR[2];
+				USR[0]<=USR[1];
+				
+				VSR[5]<=VSR[0];
+				VSR[4]<=VSR[5];
+				VSR[3]<=VSR[4];
+				VSR[2]<=VSR[3];
+				VSR[1]<=VSR[2];
+				VSR[0]<=VSR[1];
+				
+				
+				//CSC
+				YUV_even_selected<= Up_even -32'd128;// EX. v'2
+				YUV_odd_selected<= Up_odd- 32'd128; // EX. v'1
+				
+				G_even_temp <= G_even_temp - Mul_RGB_even;
+				G_odd_temp <= G_odd_temp - Mul_RGB_odd;
+				
+				// INTERPOLATION
+				U <= {24'd0,USR[1]};
+				V <= {24'd0,VSR[1]};
+				Up_prev_odd <= Up_prev_odd + Result_U_odd_long;
+				Vp_prev_odd <= Vp_prev_odd + Result_V_odd_long; 
+				
+				M1_state <= S_NEW_PIXEL_ROW_DELAY_19;	
+			end
+			
+			S_NEW_PIXEL_ROW_DELAY_19:begin
+			
+				mult1 <= 32'd21;
+				mult2 <= 32'd21;
+				
+				D_SRAM_data[0] <= SRAM_read_data;
+				
+				//Opearte Shift Registers
+				USR[5]<=USR[0];
+				USR[4]<=USR[5];
+				USR[3]<=USR[4];
+				USR[2]<=USR[3];
+				USR[1]<=USR[2];
+				USR[0]<=USR[1];
+				
+				VSR[5]<=VSR[0];
+				VSR[4]<=VSR[5];
+				VSR[3]<=VSR[4];
+				VSR[2]<=VSR[3];
+				VSR[1]<=VSR[2];
+				VSR[0]<=VSR[1];
+				
+				//read_flag 
+				read_flag <=1'b1;
+				
+				// INTERPOLATION
+				U <= {24'd0,USR[1]};
+				V <= {24'd0,VSR[1]};
+				Up_prev_odd <= Up_prev_odd - Result_U_odd_long;
+				Vp_prev_odd <= Vp_prev_odd - Result_V_odd_long; 
+				
+				// CSC
+				B_even_temp <= B_even_temp + Mul_RGB_even;
+				B_odd_temp <= B_odd_temp + Mul_RGB_odd;
+				
+				// update y counter
+				Ydata_counter <= Ydata_counter + 9'd2;
+				
+				M1_state <= S_FETCH_PIXEL_DATA_0;	
+			end
+			
+			//Common State begin#################################################################################################################
+			//COmmon State 0
+			S_FETCH_PIXEL_DATA_0:begin
+				if(read_flag == 1'b1)begin
+					mult1 <= 32'd21;
+					mult2 <= 32'd21;
+					mult3 <= 32'd76284;
+					mult4 <= 32'd76284;
+					
+					Yp_even <= {24'd0,D_SRAM_data[0][15:8]};// Y'2
+					
+					Up_even <= {24'd0,USR[4]}; // EX. U'4
+					Vp_even <= {24'd0,VSR[4]}; // EX. V'4
+					//Opearte Shift Registers
+					USR[5]<=D_SRAM_data[1][7:0];
+					USR[4]<=USR[0];
+					USR[3]<=USR[5];
+					USR[2]<=USR[4];
+					USR[1]<=USR[3];
+					USR[0]<=USR[2];
+					
+					VSR[5]<=D_SRAM_data[2][7:0];
+					VSR[4]<=VSR[0];
+					VSR[3]<=VSR[5];
+					VSR[2]<=VSR[4];
+					VSR[1]<=VSR[3];
+					VSR[0]<=VSR[2];
+					
+					//csc
+					YUV_even_selected<= {24'd0,D_SRAM_data[0][15:8]} - 32'd16; // EX. Y'4
+				   YUV_odd_selected <=Yp_odd - 32'd16; // EX. Y'3
+					G_even_buf <= Result_G_even;
+					R_even_buf <= Result_R_even;
+					B_even_buf <= Result_B_even;
+					
+					G_odd_buf <= Result_G_odd;
+					B_odd_buf<= Result_B_odd;
+					// INTERPOLATION
+					U <= {24'd0,USR[2]};
+					V <= {24'd0,VSR[2]};
+					Up_prev_odd <= Up_prev_odd + Result_U_odd_long;
+					Vp_prev_odd <= Vp_prev_odd + Result_V_odd_long; 
+					
+					// prepare to read
+					M1_SRAM_we_n <= 1'b1;
+					M1_SRAM_address_V<= (M1_SRAM_address_V+18'h1);
+					M1_SRAM_address <= M1_SRAM_address_V;
+					
+					M1_state <= S_FETCH_PIXEL_DATA_1;
+				end else if(read_flag == 1'b0)begin
+					// prepare to read
+					M1_SRAM_we_n <= 1'b1;
+					
+					Yp_even <= {24'd0,D_SRAM_data[0][15:8]};// Y'6
+					// Set UP Coff
+					mult1 <= 32'd21;
+					mult2 <= 32'd21;
+					mult3 <= 32'd76284;
+					mult4 <= 32'd76284;
+					
+					
+					//Opearte Shift Registers
+					USR[5]<=D_SRAM_data[1][15:8];
+					USR[4]<=USR[0];
+					USR[3]<=USR[5];
+					USR[2]<=USR[4];
+					USR[1]<=USR[3];
+					USR[0]<=USR[2];
+					
+					VSR[5]<=D_SRAM_data[2][15:8];
+					VSR[4]<=VSR[0];
+					VSR[3]<=VSR[5];
+					VSR[2]<=VSR[4];
+					VSR[1]<=VSR[3];
+					VSR[0]<=VSR[2];
+					
+					Up_even <= {24'd0,USR[4]}; // EX. U'6
+					Vp_even <= {24'd0,VSR[4]}; // EX. V'6
+					
+					//csc
+					YUV_even_selected <= {24'd0,D_SRAM_data[0][15:8]} - 32'd16;
+					YUV_odd_selected <= Yp_odd - 32'd16; // EX. Y'5
+					
+					G_even_buf <= Result_G_even;
+					R_even_buf <= Result_R_even;
+					B_even_buf <= Result_B_even;
+					
+					G_odd_buf <= Result_G_odd;
+					B_odd_buf<= Result_B_odd;
+					
+					// INTERPOLATION
+					U <= {24'd0,USR[2]};
+					V <= {24'd0,VSR[2]};
+					Up_prev_odd <= Up_prev_odd + Result_U_odd_long;
+					Vp_prev_odd <= Vp_prev_odd + Result_V_odd_long; 
+					// $$$NEED ATTENTION!!!  CSC write
+					M1_state <= S_FETCH_PIXEL_DATA_1;
+					end
+				end
+				
+				//COmmon State 1
+				S_FETCH_PIXEL_DATA_1:begin
+				if(read_flag == 1'b1)begin
+					mult1 <= 32'd52;
+					mult2 <= 32'd52;
+					mult3 <= 32'd104595;
+					mult4 <= 32'd104595;
+					
+					M1_SRAM_address_U<= (M1_SRAM_address_U+18'h1);
+					M1_SRAM_address <= M1_SRAM_address_U;
+					
+					//Opearte Shift Registers
+					USR[5]<=USR[0];
+					USR[4]<=USR[5];
+					USR[3]<=USR[4];
+					USR[2]<=USR[3];
+					USR[1]<=USR[2];
+					USR[0]<=USR[1];
+					
+					VSR[5]<=VSR[0];
+					VSR[4]<=VSR[5];
+					VSR[3]<=VSR[4];
+					VSR[2]<=VSR[3];
+					VSR[1]<=VSR[2];
+					VSR[0]<=VSR[1];
+					
+					
+					Yp_odd <= {24'd0,D_SRAM_data[0][7:0]}; // Y'5
+					
+					// INTERPOLATION
+					U <= {24'd0,USR[1]};
+					V <= {24'd0,VSR[1]};
+					Up_odd <= Result_U_odd; // U'3
+					Vp_odd <= Result_V_odd; // V'3
+					Up_prev_odd <=  Result_U_odd_long + 32'd128 ;
+					Vp_prev_odd <=  Result_V_odd_long + 32'd128 ;
+					
+					//  CSC 
+					YUV_even_selected<= Vp_even - 32'd128;// EX. V'4
+					YUV_odd_selected<= Result_V_odd- 32'd128; // EX. V'3
+					
+					R_even_temp <= Mul_RGB_even;
+					G_even_temp <= Mul_RGB_even;
+					B_even_temp <= Mul_RGB_even;
+					
+					R_odd_temp <= Mul_RGB_odd;
+					G_odd_temp <= Mul_RGB_odd;
+					B_odd_temp <= Mul_RGB_odd;
+				
+					M1_state <= S_FETCH_PIXEL_DATA_2;
+				end else if(read_flag == 1'b0)begin
+					mult1 <= 32'd52;
+					mult2 <= 32'd52;
+					mult3 <= 32'd104595;
+					mult4 <= 32'd104595;
+					
+					Yp_odd <= {24'd0,D_SRAM_data[0][7:0]}; // Y'7
+					
+					//Opearte Shift Registers
+					USR[5]<=USR[0];
+					USR[4]<=USR[5];
+					USR[3]<=USR[4];
+					USR[2]<=USR[3];
+					USR[1]<=USR[2];
+					USR[0]<=USR[1];
+					
+					VSR[5]<=VSR[0];
+					VSR[4]<=VSR[5];
+					VSR[3]<=VSR[4];
+					VSR[2]<=VSR[3];
+					VSR[1]<=VSR[2];
+					VSR[0]<=VSR[1];
+					
+					//  CSC 
+					YUV_even_selected<= Vp_even - 32'd128;// EX. V'6
+					YUV_odd_selected<= Result_V_odd- 32'd128; // EX. V'5
+					
+					R_even_temp <= Mul_RGB_even;
+					G_even_temp <= Mul_RGB_even;
+					B_even_temp <= Mul_RGB_even;
+					
+					R_odd_temp <= Mul_RGB_odd;
+					G_odd_temp <= Mul_RGB_odd;
+					B_odd_temp <= Mul_RGB_odd;
+					
+					
+					
+					// INTERPOLATION
+					U <= {24'd0,USR[1]};
+					V <= {24'd0,VSR[1]};
+					Up_odd <= Result_U_odd; // U'5
+					Vp_odd <= Result_V_odd; // V'5
+					Up_prev_odd <=  Result_U_odd_long + 32'd128 ;
+					Vp_prev_odd <=  Result_V_odd_long + 32'd128 ;
+					M1_state <= S_FETCH_PIXEL_DATA_2;
+					
+				end
+			end
+			
+				//Common State 2
+				S_FETCH_PIXEL_DATA_2:begin
+				if(read_flag == 1'b1)begin
+					mult1 <= 32'd159;
+					mult2 <= 32'd159;
+					mult3 <= 32'd25624;
+					mult4 <= 32'd25624;
+					
+					M1_SRAM_address_Y<= (M1_SRAM_address_Y+18'h1);
+					M1_SRAM_address <= M1_SRAM_address_Y;
+					
+					//Opearte Shift Registers
+					USR[5]<=USR[0];
+					USR[4]<=USR[5];
+					USR[3]<=USR[4];
+					USR[2]<=USR[3];
+					USR[1]<=USR[2];
+					USR[0]<=USR[1];
+					
+					VSR[5]<=VSR[0];
+					VSR[4]<=VSR[5];
+					VSR[3]<=VSR[4];
+					VSR[2]<=VSR[3];
+					VSR[1]<=VSR[2];
+					VSR[0]<=VSR[1];
+					
+					// INTERPOLATION
+					U <= {24'd0,USR[1]};
+					V <= {24'd0,VSR[1]};
+					Up_prev_odd <= Up_prev_odd - Result_U_odd_long;
+					Vp_prev_odd <= Vp_prev_odd - Result_V_odd_long; 
+					
+					// CSC
+					YUV_even_selected<= Up_even - 32'd128;// EX. u'4
+					YUV_odd_selected<= Up_odd- 32'd128; // EX. u'3
+					
+					R_even_temp <= R_even_temp + Mul_RGB_even;
+					R_odd_temp <= R_odd_temp + Mul_RGB_odd;	
+						
+					M1_state <= S_FETCH_PIXEL_DATA_3;
+				end else if(read_flag == 1'b0)begin
+					mult1 <= 32'd159;
+					mult2 <= 32'd159;
+					mult3 <= 32'd25624;
+					mult4 <= 32'd25624;
+					
+					M1_SRAM_address_Y<= (M1_SRAM_address_Y+18'h1);
+					M1_SRAM_address <= M1_SRAM_address_Y;
+					
+					//Opearte Shift Registers
+					USR[5]<=USR[0];
+					USR[4]<=USR[5];
+					USR[3]<=USR[4];
+					USR[2]<=USR[3];
+					USR[1]<=USR[2];
+					USR[0]<=USR[1];
+					
+					VSR[5]<=VSR[0];
+					VSR[4]<=VSR[5];
+					VSR[3]<=VSR[4];
+					VSR[2]<=VSR[3];
+					VSR[1]<=VSR[2];
+					VSR[0]<=VSR[1];
+					
+					// INTERPOLATION
+					U <= {24'd0,USR[1]};
+					V <= {24'd0,VSR[1]};
+					Up_prev_odd <= Up_prev_odd - Result_U_odd_long;
+					Vp_prev_odd <= Vp_prev_odd - Result_V_odd_long; 
+					
+					// CSC
+					YUV_even_selected<= Up_even - 32'd128;// EX. u'6
+					YUV_odd_selected<= Up_odd- 32'd128; // EX. u'5
+					
+					R_even_temp <= R_even_temp + Mul_RGB_even;
+					R_odd_temp <= R_odd_temp + Mul_RGB_odd;
+					
+					M1_state <= S_FETCH_PIXEL_DATA_3;
+				end
+			end
+			
+				//COmmon State 3
+				S_FETCH_PIXEL_DATA_3:begin
+				if(read_flag == 1'b1)begin
+					mult1 <= 32'd159;
+					mult2 <= 32'd159;
+					mult3 <= 32'd53281;
+					mult4 <= 32'd53281;
+					
+					D_SRAM_data[2] <= SRAM_read_data;
+					
+					//Opearte Shift Registers
+					USR[5]<=USR[0];
+					USR[4]<=USR[5];
+					USR[3]<=USR[4];
+					USR[2]<=USR[3];
+					USR[1]<=USR[2];
+					USR[0]<=USR[1];
+					
+					VSR[5]<=VSR[0];
+					VSR[4]<=VSR[5];
+					VSR[3]<=VSR[4];
+					VSR[2]<=VSR[3];
+					VSR[1]<=VSR[2];
+					VSR[0]<=VSR[1];
+					
+					// INTERPOLATION
+					U <= {24'd0,USR[1]};
+					V <= {24'd0,VSR[1]};
+					Up_prev_odd <= Up_prev_odd + Result_U_odd_long;
+					Vp_prev_odd <= Vp_prev_odd + Result_V_odd_long; 
+					
+					//  CSC
+					YUV_even_selected<= Vp_even - 32'd128;// EX. v'4
+					YUV_odd_selected<= Vp_odd- 32'd128; // EX. v'3
+					
+					G_even_temp <= G_even_temp - Mul_RGB_even;
+					G_odd_temp <= G_odd_temp -Mul_RGB_odd;
+					
+					// Write g1 b1
+					M1_SRAM_we_n <= 1'b0;
+					M1_SRAM_address_RGB <= (M1_SRAM_address_RGB + 18'h1);
+					M1_SRAM_address <= M1_SRAM_address_RGB;
+					M1_SRAM_write_data <= {{G_odd_buf},{B_odd_buf}};
+					
+					M1_state <= S_FETCH_PIXEL_DATA_4;
+				end else if(read_flag == 1'b0)begin
+					mult1 <= 32'd159;
+					mult2 <= 32'd159;
+					mult3 <= 32'd53281;
+					mult4 <= 32'd53281;
+					
+					//Opearte Shift Registers
+					USR[5]<=USR[0];
+					USR[4]<=USR[5];
+					USR[3]<=USR[4];
+					USR[2]<=USR[3];
+					USR[1]<=USR[2];
+					USR[0]<=USR[1];
+					
+					VSR[5]<=VSR[0];
+					VSR[4]<=VSR[5];
+					VSR[3]<=VSR[4];
+					VSR[2]<=VSR[3];
+					VSR[1]<=VSR[2];
+					VSR[0]<=VSR[1];
+								
+					// INTERPOLATION
+					U <= {24'd0,USR[1]};
+					V <= {24'd0,VSR[1]};
+					Up_prev_odd <= Up_prev_odd + Result_U_odd_long;
+					Vp_prev_odd <= Vp_prev_odd + Result_V_odd_long; 
+
+					//  CSC
+					YUV_even_selected<= Vp_even - 32'd128;// EX. v'6
+					YUV_odd_selected<= Vp_odd- 32'd128; // EX. v'5
+					
+					G_even_temp <= G_even_temp - Mul_RGB_even;
+					G_odd_temp <= G_odd_temp -Mul_RGB_odd;
+					
+					// Write g1 b1
+					M1_SRAM_we_n <= 1'b0;
+					M1_SRAM_address_RGB <= (M1_SRAM_address_RGB + 18'h1);
+					M1_SRAM_address <= M1_SRAM_address_RGB;
+					M1_SRAM_write_data <= {{G_odd_buf},{B_odd_buf}}; // G3,B3
+					
+					M1_state <= S_FETCH_PIXEL_DATA_4;
+				end
+			end
+			
+				//COmmon State 4
+				S_FETCH_PIXEL_DATA_4:begin
+				if(read_flag == 1'b1)begin
+					mult1 <= 32'd52;
+					mult2 <= 32'd52;
+					mult3 <= 32'd132251;
+					mult4 <= 32'd132251;
+					
+					D_SRAM_data[1] <= SRAM_read_data;
+					
+					//Opearte Shift Registers
+					USR[5]<=USR[0];
+					USR[4]<=USR[5];
+					USR[3]<=USR[4];
+					USR[2]<=USR[3];
+					USR[1]<=USR[2];
+					USR[0]<=USR[1];
+					
+					VSR[5]<=VSR[0];
+					VSR[4]<=VSR[5];
+					VSR[3]<=VSR[4];
+					VSR[2]<=VSR[3];
+					VSR[1]<=VSR[2];
+					VSR[0]<=VSR[1];
+					
+					// INTERPOLATION
+					U <= {24'd0,USR[1]};
+					V <= {24'd0,VSR[1]};
+					Up_prev_odd <= Up_prev_odd + Result_U_odd_long;
+					Vp_prev_odd <= Vp_prev_odd + Result_V_odd_long; 
+					
+					//  CSC
+					YUV_even_selected<= Up_even - 32'd128;// EX. U'4
+					YUV_odd_selected<= Up_odd- 32'd128; // EX. U'3
+					
+					G_even_temp <= G_even_temp - Mul_RGB_even;
+					G_odd_temp <= G_odd_temp -Mul_RGB_odd;
+					// write R2G2
+					M1_SRAM_address_RGB <= (M1_SRAM_address_RGB + 18'h1);
+					M1_SRAM_address <= M1_SRAM_address_RGB;
+					M1_SRAM_write_data <= {{R_even_buf},{G_even_buf}};
+					
+					M1_state <= S_FETCH_PIXEL_DATA_5;
+				end else if(read_flag == 1'b0)begin
+					mult1 <= 32'd52;
+					mult2 <= 32'd52;
+					mult3 <= 32'd132251;
+					mult4 <= 32'd132251;
+					
+					//Opearte Shift Registers
+					USR[5]<=USR[0];
+					USR[4]<=USR[5];
+					USR[3]<=USR[4];
+					USR[2]<=USR[3];
+					USR[1]<=USR[2];
+					USR[0]<=USR[1];
+					
+					VSR[5]<=VSR[0];
+					VSR[4]<=VSR[5];
+					VSR[3]<=VSR[4];
+					VSR[2]<=VSR[3];
+					VSR[1]<=VSR[2];
+					VSR[0]<=VSR[1];
+					
+					// INTERPOLATION
+					U <= {24'd0,USR[1]};
+					V <= {24'd0,VSR[1]};
+					Up_prev_odd <= Up_prev_odd + Result_U_odd_long;
+					Vp_prev_odd <= Vp_prev_odd + Result_V_odd_long; 			
+					
+					//  CSC
+					YUV_even_selected<= Up_even - 32'd128;// EX. U'6
+					YUV_odd_selected<= Up_odd- 32'd128 ; // EX. U'5
+					
+					G_even_temp <= G_even_temp - Mul_RGB_even;
+					G_odd_temp <= G_odd_temp -Mul_RGB_odd;
+					//write B4,R5;
+					//write G3,B3
+					// write R2G2
+					// R4,G4
+					M1_SRAM_address_RGB <= (M1_SRAM_address_RGB + 18'h1);
+					M1_SRAM_address <= M1_SRAM_address_RGB;
+					M1_SRAM_write_data <= {{R_even_buf},{G_even_buf}};
+					M1_state <= S_FETCH_PIXEL_DATA_5;
+				end
+			end
+			
+			S_FETCH_PIXEL_DATA_5:begin
+				if(read_flag == 1'b1)begin
+					mult1 <= 32'd21;
+					mult2 <= 32'd21;
+					
+					Yp_even <= {24'd0,SRAM_read_data[15:8]};// Y'2
+					D_SRAM_data[0] <= SRAM_read_data;
+					
+					//Opearte Shift Registers
+					USR[5]<=USR[0];
+					USR[4]<=USR[5];
+					USR[3]<=USR[4];
+					USR[2]<=USR[3];
+					USR[1]<=USR[2];
+					USR[0]<=USR[1];
+					
+					VSR[5]<=VSR[0];
+					VSR[4]<=VSR[5];
+					VSR[3]<=VSR[4];
+					VSR[2]<=VSR[3];
+					VSR[1]<=VSR[2];
+					VSR[0]<=VSR[1];
+					
+					//Update read_flag
+					read_flag <= ~read_flag;
+					
+					// INTERPOLATION
+					U <= {24'd0,USR[1]};
+					V <= {24'd0,VSR[1]};
+					
+					Up_prev_odd <= Up_prev_odd - Result_U_odd_long;
+					Vp_prev_odd <= Vp_prev_odd - Result_V_odd_long; 
+					
+					// CSC
+					B_even_temp <= B_even_temp + Mul_RGB_even;
+					B_odd_temp <= B_odd_temp + Mul_RGB_odd;
+					// update y counter
+					Ydata_counter <= Ydata_counter + 9'd2;
+					
+					M1_SRAM_address_RGB <= (M1_SRAM_address_RGB + 18'h1);
+					M1_SRAM_address <= M1_SRAM_address_RGB;
+					M1_SRAM_write_data <= {{B_even_buf},{Result_R_odd}}; // B4,R5
+					
+					if(Ydata_counter < 9'd314)begin
+						M1_state <= S_FETCH_PIXEL_DATA_0;
+					end else begin
+						M1_state <= S_OUT_PIXEL_DELAY_0;
+					end
+					
+				end else if(read_flag == 1'b0)begin
+					mult1 <= 32'd21;
+					mult2 <= 32'd21;
+					Yp_even <= {24'd0,SRAM_read_data[15:8]};// Y'2
+					D_SRAM_data[0] <=  SRAM_read_data;
+					
+					//Opearte Shift Registers
+					USR[5]<=USR[0];
+					USR[4]<=USR[5];
+					USR[3]<=USR[4];
+					USR[2]<=USR[3];
+					USR[1]<=USR[2];
+					USR[0]<=USR[1];
+					
+					VSR[5]<=VSR[0];
+					VSR[4]<=VSR[5];
+					VSR[3]<=VSR[4];
+					VSR[2]<=VSR[3];
+					VSR[1]<=VSR[2];
+					VSR[0]<=VSR[1];
+								
+					
+					//Update	read_flag
+					read_flag <= ~read_flag;
+					
+					// INTERPOLATION
+					U <= {24'd0,USR[1]};
+					V <= {24'd0,VSR[1]};
+					Up_prev_odd <= Up_prev_odd - Result_U_odd_long;
+					Vp_prev_odd <= Vp_prev_odd - Result_V_odd_long; 
+					
+					//CSC
+					B_even_temp <= B_even_temp + Mul_RGB_even;
+					B_odd_temp <= B_odd_temp + Mul_RGB_odd;
+					// update y counter
+					Ydata_counter <= Ydata_counter + 9'd2;
+					
+					M1_SRAM_address_RGB <= (M1_SRAM_address_RGB + 18'h1);
+					M1_SRAM_address <= M1_SRAM_address_RGB;
+					M1_SRAM_write_data <= {{B_even_buf},{Result_R_odd}}; // write B4,R5
+					
+					if(Ydata_counter < 9'd314)begin
+						M1_state <= S_FETCH_PIXEL_DATA_0;
+					end else begin
+						M1_state <= S_OUT_PIXEL_DELAY_0;
+					end
+				end
+				
+				end
+				
+			// lead out	
+			S_OUT_PIXEL_DELAY_0:begin
+				mult1 <= 32'd21;
+				mult2 <= 32'd21;
+				mult3 <= 32'd76284;
+				mult4 <= 32'd76284;
+				
+				if(lo_state_counter == 4'd0)begin
+					//Opearte Shift Registers
+					USR[5]<=USR[0]; 
+					USR[4]<=USR[0];
+					USR[3]<=USR[5];
+					USR[2]<=USR[4];
+					USR[1]<=USR[3];
+					USR[0]<=USR[2];
+					
+					VSR[5]<=VSR[0];
+					VSR[4]<=VSR[0];
+					VSR[3]<=VSR[5];
+					VSR[2]<=VSR[4];
+					VSR[1]<=VSR[3];
+					VSR[0]<=VSR[2];
+				end else if(lo_state_counter == 4'd1)begin
+					//Opearte Shift Registers
+					USR[5]<=USR[0]; 
+					USR[4]<=USR[0];
+					USR[3]<=USR[0];
+					USR[2]<=USR[4];
+					USR[1]<=USR[3];
+					USR[0]<=USR[2];
+					
+					VSR[5]<=VSR[0];
+					VSR[4]<=VSR[0];
+					VSR[3]<=VSR[0];
+					VSR[2]<=VSR[4];
+					VSR[1]<=VSR[3];
+					VSR[0]<=VSR[2];
+				end else if(lo_state_counter == 4'd2)begin
+					//Opearte Shift Registers
+					USR[5]<=USR[0]; 
+					USR[4]<=USR[0];
+					USR[3]<=USR[0];
+					USR[2]<=USR[0];
+					USR[1]<=USR[3];
+					USR[0]<=USR[2];
+					
+					VSR[5]<=VSR[0];
+					VSR[4]<=VSR[0];
+					VSR[3]<=VSR[0];
+					VSR[2]<=VSR[0];
+					VSR[1]<=VSR[3];
+					VSR[0]<=VSR[2];
+				end
+				
+				Up_even <= {24'd0,USR[4]}; // EX. U'
+				Vp_even <= {24'd0,VSR[4]}; // EX. V'
+
+				//csc
+				YUV_even_selected <= Yp_even - 32'd16; // EX. Y'
+				YUV_odd_selected <= Yp_odd - 32'd16; // EX. Y'
+				G_even_buf <= Result_G_even;
+				G_odd_buf <= Result_G_odd;
+				B_even_buf <=Result_B_even;
+				B_odd_buf <= Result_B_odd;
+				R_even_buf <= Result_R_even;
+				
+				// INTERPOLATION
+				U <= {24'd0,USR[2]};
+				V <= {24'd0,VSR[2]};
+				Up_prev_odd <= Up_prev_odd + Result_U_odd_long ;
+				Vp_prev_odd <= Vp_prev_odd + Result_V_odd_long ; 
+				
+				M1_SRAM_we_n <= 1'b1;
+				M1_state <= S_OUT_PIXEL_DELAY_1;
+			end
+			
+			//lead out common states 1
+			S_OUT_PIXEL_DELAY_1:begin
+				mult1 <= 32'd52;
+				mult2 <= 32'd52;
+				mult3 <= 32'd104595;
+				mult4 <= 32'd104595;
+				
+				Yp_odd <= {24'd0,D_SRAM_data[0][7:0]}; // Y'
+				
+				//Opearte Shift Registers
+				USR[5]<=USR[0];
+				USR[4]<=USR[5];
+				USR[3]<=USR[4];
+				USR[2]<=USR[3];
+				USR[1]<=USR[2];
+				USR[0]<=USR[1];
+				
+				VSR[5]<=VSR[0];
+				VSR[4]<=VSR[5];
+				VSR[3]<=VSR[4];
+				VSR[2]<=VSR[3];
+				VSR[1]<=VSR[2];
+				VSR[0]<=VSR[1];
+				
+				//  CSC 
+				YUV_even_selected<= Vp_even - 32'd128;// EX. V'314
+				YUV_odd_selected<= Result_V_odd - 32'd128; // EX. V'313
+				
+				R_even_temp <= Mul_RGB_even;
+				G_even_temp <= Mul_RGB_even;
+				B_even_temp <= Mul_RGB_even;
+				
+				R_odd_temp <= Mul_RGB_odd;
+				G_odd_temp <= Mul_RGB_odd;
+				B_odd_temp <= Mul_RGB_odd;
+				
+				
+				
+				// INTERPOLATION
+				U <= {24'd0,USR[1]};
+				V <= {24'd0,VSR[1]};
+				Up_odd <= Result_U_odd; // U'313
+				Vp_odd <= Result_V_odd; // V'313
+				Up_prev_odd <=  Result_U_odd_long + 32'd128 ;
+				Vp_prev_odd <=  Result_V_odd_long + 32'd128 ;
+				M1_state <= S_OUT_PIXEL_DELAY_2;
+				
+			end
+			
+				//lead out common state 2
+				S_OUT_PIXEL_DELAY_2:begin
+					mult1 <= 32'd159;
+					mult2 <= 32'd159;
+					mult3 <= 32'd25624;
+					mult4 <= 32'd25624;
+					
+					if(lo_state_counter != 4'd2)begin
+						M1_SRAM_address_Y<= (M1_SRAM_address_Y+18'h1);
+					   M1_SRAM_address <= M1_SRAM_address_Y;
+					end
+				
+					//Opearte Shift Registers
+					USR[5]<=USR[0];
+					USR[4]<=USR[5];
+					USR[3]<=USR[4];
+					USR[2]<=USR[3];
+					USR[1]<=USR[2];
+					USR[0]<=USR[1];
+					
+					VSR[5]<=VSR[0];
+					VSR[4]<=VSR[5];
+					VSR[3]<=VSR[4];
+					VSR[2]<=VSR[3];
+					VSR[1]<=VSR[2];
+					VSR[0]<=VSR[1];
+					
+					// INTERPOLATION
+					U <= {24'd0,USR[1]};
+					V <= {24'd0,VSR[1]};
+					Up_prev_odd <= Up_prev_odd - Result_U_odd_long;
+					Vp_prev_odd <= Vp_prev_odd - Result_V_odd_long; 
+					
+					// CSC
+					YUV_even_selected<= Up_even - 32'd128;// EX. u'314
+					YUV_odd_selected<= Up_odd- 32'd128; // EX. u'313
+					
+					R_even_temp <= R_even_temp + Mul_RGB_even;
+					R_odd_temp <= R_odd_temp + Mul_RGB_odd;
+							
+					M1_state <= S_OUT_PIXEL_DELAY_3;
+					
+				end
+
+				//common state 3
+				S_OUT_PIXEL_DELAY_3:begin
+					mult1 <= 32'd159;
+					mult2 <= 32'd159;
+					mult3 <= 32'd53281;
+					mult4 <= 32'd53281;
+					
+					//Opearte Shift Registers
+					USR[5]<=USR[0];
+					USR[4]<=USR[5];
+					USR[3]<=USR[4];
+					USR[2]<=USR[3];
+					USR[1]<=USR[2];
+					USR[0]<=USR[1];
+					
+					VSR[5]<=VSR[0];
+					VSR[4]<=VSR[5];
+					VSR[3]<=VSR[4];
+					VSR[2]<=VSR[3];
+					VSR[1]<=VSR[2];
+					VSR[0]<=VSR[1];
+								
+					// INTERPOLATION
+					U <= {24'd0,USR[1]};
+					V <= {24'd0,VSR[1]};
+					Up_prev_odd <= Up_prev_odd + Result_U_odd_long;
+					Vp_prev_odd <= Vp_prev_odd + Result_V_odd_long; 
+
+					//  CSC
+					YUV_even_selected<= Vp_even - 32'd128;// EX. v'314
+					YUV_odd_selected<= Vp_odd- 32'd128; // EX. v'313
+					
+					G_even_temp <= G_even_temp - Mul_RGB_even;
+					G_odd_temp <= G_odd_temp -Mul_RGB_odd;
+					//write G311,B311
+					M1_SRAM_we_n <= 1'b0;
+					M1_SRAM_address_RGB <= (M1_SRAM_address_RGB + 18'h1);
+					M1_SRAM_address <= M1_SRAM_address_RGB;
+					M1_SRAM_write_data <= {{G_odd_buf},{B_odd_buf}};
+					
+					M1_state <= S_OUT_PIXEL_DELAY_4;
+				end
+
+				//common state 4
+				S_OUT_PIXEL_DELAY_4:begin
+					mult1 <= 32'd52;
+					mult2 <= 32'd52;
+					mult3 <= 32'd132251;
+					mult4 <= 32'd132251;
+					
+					//Opearte Shift Registers
+					USR[5]<=USR[0];
+					USR[4]<=USR[5];
+					USR[3]<=USR[4];
+					USR[2]<=USR[3];
+					USR[1]<=USR[2];
+					USR[0]<=USR[1];
+					
+					VSR[5]<=VSR[0];
+					VSR[4]<=VSR[5];
+					VSR[3]<=VSR[4];
+					VSR[2]<=VSR[3];
+					VSR[1]<=VSR[2];
+					VSR[0]<=VSR[1];
+					
+					// INTERPOLATION
+					U <= {24'd0,USR[1]};
+					V <= {24'd0,VSR[1]};
+					Up_prev_odd <= Up_prev_odd + Result_U_odd_long;
+					Vp_prev_odd <= Vp_prev_odd + Result_V_odd_long; 			
+					
+					//  CSC
+					YUV_even_selected<= Up_even - 32'd128;// EX. U'6
+					YUV_odd_selected<= Up_odd- 32'd128; // EX. U'5
+					
+					G_even_temp <= G_even_temp - Mul_RGB_even;
+					G_odd_temp <= G_odd_temp -Mul_RGB_odd;
+					//write R312,G312
+					M1_SRAM_address_RGB <= (M1_SRAM_address_RGB + 18'h1);
+					M1_SRAM_address <= M1_SRAM_address_RGB;
+					M1_SRAM_write_data <= {{R_even_buf},{G_even_buf}};
+					
+					M1_state <= S_OUT_PIXEL_DELAY_5;
+				end
+				
+				//lead out common state 5
+				S_OUT_PIXEL_DELAY_5:begin
+				
+					lo_state_counter <= lo_state_counter+4'd1; // incrementing counter from 0 to 2 (3 times)
+					
+					
+					
+					mult1 <= 32'd21;
+					mult2 <= 32'd21;
+					
+					if(lo_state_counter != 4'd2)begin
+						D_SRAM_data[0] <=  SRAM_read_data;
+						Yp_even <= {24'd0,SRAM_read_data[15:8]};// Y'
+					end
+					//Opearte Shift Registers
+					USR[5]<=USR[0];
+					USR[4]<=USR[5];
+					USR[3]<=USR[4];
+					USR[2]<=USR[3];
+					USR[1]<=USR[2];
+					USR[0]<=USR[1];
+					
+					VSR[5]<=VSR[0];
+					VSR[4]<=VSR[5];
+					VSR[3]<=VSR[4];
+					VSR[2]<=VSR[3];
+					VSR[1]<=VSR[2];
+					VSR[0]<=VSR[1];
+											
+					// INTERPOLATION
+					U <= {24'd0,USR[1]};
+					V <= {24'd0,VSR[1]};
+					Up_prev_odd <= Up_prev_odd - Result_U_odd_long;
+					Vp_prev_odd <= Vp_prev_odd - Result_V_odd_long; 
+					
+					//CSC
+					B_even_temp <= B_even_temp + Mul_RGB_even;
+					B_odd_temp <= B_odd_temp + Mul_RGB_odd;
+					
+					// update y counter
+					if(lo_state_counter <2)begin
+						Ydata_counter <= Ydata_counter + 9'd2;
+					end
+					//prepare to read
+					M1_SRAM_we_n <= 1'b0;
+					M1_SRAM_address_RGB <= (M1_SRAM_address_RGB + 18'h1);
+					M1_SRAM_address <= M1_SRAM_address_RGB;
+					M1_SRAM_write_data <= {{B_even_buf},{Result_R_odd}};
+					
+					if(lo_state_counter == 4'd2)begin
+						M1_state <= S_LEAD_OUT_CSC0;
+					end else begin
+						M1_state <= S_OUT_PIXEL_DELAY_0;
+					end
+				end
+				
+				//lead out of lead out 0	
+				S_LEAD_OUT_CSC0:begin
+				
+					mult1 <= 32'd21;
+					mult2 <= 32'd21;
+					mult3 <= 32'd76284;
+					mult4 <= 32'd76284;
+					M1_SRAM_we_n <= 1'b1;
+					
+					YUV_odd_selected <= Yp_odd - 32'd16; // EX. Y'319
+					
+					Up_prev_odd <= Up_prev_odd + Result_U_odd_long ;
+					Vp_prev_odd <= Vp_prev_odd + Result_V_odd_long ; 
+					
+					G_even_buf <= Result_G_even;
+					G_odd_buf <= Result_G_odd;
+					B_even_buf <= Result_B_even;
+					B_odd_buf <= Result_B_odd;
+					R_even_buf <= Result_R_even;
+					
+					M1_state <= S_LEAD_OUT_CSC1;
+				end
+				
+			//lo of lo 1	
+				S_LEAD_OUT_CSC1:begin
+					mult3 <= 32'd104595;
+				   mult4 <= 32'd104595;
+					Up_odd <= Result_U_odd; // U'319
+					Vp_odd <= Result_V_odd; // V'319
+					YUV_odd_selected<= Result_V_odd- 32'd128; // EX. V'319
+					
+					R_odd_temp <= Mul_RGB_odd;
+					G_odd_temp <= Mul_RGB_odd;
+					B_odd_temp <= Mul_RGB_odd;
+					
+					M1_state <= S_LEAD_OUT_CSC2;
+				end
+				
+				S_LEAD_OUT_CSC2:begin
+					mult3 <= 32'd25624;
+				   mult4 <= 32'd25624;
+					YUV_odd_selected<= Up_odd- 32'd128; // EX. U'319
+					R_odd_temp <= R_odd_temp + Mul_RGB_odd;
+					M1_state <= S_LEAD_OUT_CSC3;
+				end
+				
+				S_LEAD_OUT_CSC3:begin
+					mult3 <= 32'd53281;
+				   mult4 <= 32'd53281;
+					YUV_odd_selected<= Vp_odd- 32'd128; // EX. U'319
+					G_odd_temp <= G_odd_temp -Mul_RGB_odd;
+					M1_SRAM_we_n <= 1'b0;
+					M1_SRAM_address_RGB <= (M1_SRAM_address_RGB + 18'h1);
+					M1_SRAM_address <= M1_SRAM_address_RGB;
+					M1_SRAM_write_data <= {{G_odd_buf},{B_odd_buf}};
+					M1_state <= S_LEAD_OUT_CSC4;
+				end 
+				
+				
+				S_LEAD_OUT_CSC4:begin
+					mult3 <= 32'd132251;
+				   mult4 <= 32'd132251;
+					YUV_odd_selected<= Up_odd- 32'd128; // EX. U'319
+					G_odd_temp <= G_odd_temp -Mul_RGB_odd;
+					M1_SRAM_address_RGB <= (M1_SRAM_address_RGB + 18'h1);
+					M1_SRAM_address <= M1_SRAM_address_RGB;
+					M1_SRAM_write_data <= {{R_even_buf},{G_even_buf}};
+					M1_state <= S_LEAD_OUT_CSC5;
+				end 
+				
+				
+				S_LEAD_OUT_CSC5:begin
+					B_odd_temp <= B_odd_temp + Mul_RGB_odd;
+					M1_SRAM_address_RGB <= (M1_SRAM_address_RGB + 18'h1);
+					M1_SRAM_address <= M1_SRAM_address_RGB;
+					M1_SRAM_write_data <= {{B_even_buf},{Result_R_odd}};
+					M1_state <= S_LEAD_OUT_CSC6;
+				end
+				S_LEAD_OUT_CSC6:begin
+					// update row_counter 
+					row_counter<=row_counter+9'd1;
+					if(row_counter <239)begin
+						M1_SRAM_address_V <=M1_SRAM_address_V - 18'h1;
+						M1_SRAM_address_U <=M1_SRAM_address_U - 18'h1;
+					end
+					M1_SRAM_address_RGB <= (M1_SRAM_address_RGB + 18'h1);
+					M1_SRAM_address <= M1_SRAM_address_RGB;
+					M1_SRAM_write_data <= {{Result_G_odd},{Result_B_odd}};
+					
+					M1_state<=  M1_IDLE;
+				end
+				
+				default: M1_state <= M1_IDLE;
+			endcase
+	end
+end
+
+
+// multipuilers
+
+always_comb begin  // for U' odd
+		CU = mult1;
+end
+
+assign Result_U_odd_long = $signed(CU) * $signed(U); //Result 32 bit signed
+assign Result_U_odd = {{8{Up_prev_odd[31]}},Up_prev_odd[31:8]};
+always_comb begin // for V'odd
+		CV = mult2;
+end
+
+
+assign Result_V_odd_long = $signed(CV) * $signed(V); //Result 32 bit signed
+assign Result_V_odd = {{8{Vp_prev_odd[31]}},Vp_prev_odd[31:8]};
+
+always_comb begin // RGB even
+		CEC = mult3;
+		op1 = YUV_even_selected;
+end
+
+assign Mul_RGB_even = CEC * op1;
+
+assign Result_R_even = R_even_temp[31]? 8'd0 : |R_even_temp[30:24]? 8'd255 : R_even_temp[23:16];
+assign Result_G_even = G_even_temp[31]? 8'd0 : |G_even_temp[30:24]? 8'd255 : G_even_temp[23:16];
+assign Result_B_even = B_even_temp[31]? 8'd0 : |B_even_temp[30:24]? 8'd255 : B_even_temp[23:16];
+
+always_comb begin // RGB odd
+		COC = mult4;
+		op2 = YUV_odd_selected;
+end
+assign Mul_RGB_odd = COC * op2;
+
+assign Result_R_odd = R_odd_temp[31]? 8'd0 : |R_odd_temp[30:24]? 8'd255 : R_odd_temp[23:16];
+assign Result_G_odd = G_odd_temp[31]? 8'd0 : |G_odd_temp[30:24]? 8'd255 : G_odd_temp[23:16];
+assign Result_B_odd = B_odd_temp[31]? 8'd0 : |B_odd_temp[30:24]? 8'd255 : B_odd_temp[23:16];
+
+
+endmodule
