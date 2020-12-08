@@ -1,0 +1,5455 @@
+/*
+Copyright by Henry Ko, Jingming Liu and Nicola Nicolici
+Department of Electrical and Computer Engineering
+McMaster University
+Ontario, Canada
+*/
+
+`timescale 1ns/100ps
+`ifndef DISABLE_DEFAULT_NET
+`default_nettype none
+`endif
+
+`include "define_state.h"
+
+module milestone2(
+		/////// board clocks                      ////////////
+		input logic CLOCK_50_I,                   // 50 MHz clock
+		input logic resetn,
+		input logic milestone_two_start,
+		input logic [15:0]SRAM_read_data,
+		
+		output logic milestone_two_stop,
+		output logic[17:0] M2_SRAM_address,
+		output logic M2_SRAM_we_n,
+		output logic[15:0] M2_SRAM_write_data
+);
+
+M2_state_type M2_state;
+	
+//UNIVERISAL VARABILE
+
+logic half_flag;
+logic [6:0] State_counter;
+logic [31:0] S_P;
+
+logic CT_flag;
+logic CS_flag;
+
+logic [31:0] OP1;
+logic [31:0] OP2;
+
+
+logic [31:0] OP3;
+logic [31:0] OP4;
+
+logic [31:0] OP5;
+logic [31:0] OP6;
+
+logic [31:0] OP7;
+logic [31:0] OP8;
+logic [5:0] C1_index;
+logic [5:0] C2_index;
+logic [5:0] C3_index;
+logic [5:0] C4_index;
+logic [2:0] ROW_INDEX;
+logic [12:0] MEGA_state_counter;
+
+logic [31:0] Result_one;
+logic [31:0] Result_two;
+logic [31:0] Result_three;
+logic [31:0] Result_four;
+
+// For Fetch YUV,
+logic [2:0] fetch_col_i;
+logic [2:0] fetch_row_i;
+logic [5:0] fetch_col_b;
+logic [4:0] fetch_row_b;
+
+logic [17:0] M2_READ_address;
+
+logic [6:0]DP1_addr_b;
+logic DP1_we_n_b;
+logic [31:0]DP1_write_data_b;
+logic [31:0]DP1_read_data_b;
+logic [6:0]DP1_addr_a;
+logic DP1_we_n_a;
+logic [31:0]DP1_write_data_a; 
+logic [31:0]DP1_read_data_a;
+
+logic [17:0] Y_base;
+logic [17:0] col_base;
+logic [17:0] S_base;
+logic First_Fetch;
+
+// FOR COMPUTE T
+logic [31:0] CX1;
+logic [31:0] CX2;
+logic [31:0] CX3;
+logic [31:0] CX4;
+
+logic First_Write;
+
+logic [15:0] mult1;
+logic [15:0] mult2;
+logic [15:0] mult3;
+logic [15:0] mult4;
+
+logic [2:0] C_col_i1;
+logic [2:0] C_col_i2;
+logic [2:0] C_col_i3;
+logic [2:0] C_col_i4;
+
+
+logic [31:0]Twrite_buf[3:0];
+
+logic [6:0]DP2_addr_b;
+logic DP2_we_n_b;
+logic [31:0]DP2_write_data_b;
+logic [31:0]DP2_read_data_b;
+logic [6:0]DP2_addr_a;
+logic DP2_we_n_a;
+logic [31:0]DP2_write_data_a; // Write DP
+logic [31:0]DP2_read_data_a;
+
+logic [31:0]T_ACC_one;
+logic [31:0]T_ACC_two;
+logic [31:0]T_ACC_three;
+logic [31:0]T_ACC_four;
+
+logic [31:0] Result_T_one;
+logic [31:0] Result_T_two;
+logic [31:0] Result_T_three;
+logic [31:0] Result_T_four;
+
+logic [2:0] S_row;
+logic [2:0] S_col;
+// For Compute S
+
+
+logic [31:0]Swrite_buf[3:0];
+
+
+logic [6:0]DP3_addr_b;
+logic DP3_we_n_b;
+logic [31:0]DP3_write_data_b;
+logic [31:0]DP3_read_data_b;
+logic [6:0]DP3_addr_a;
+logic DP3_we_n_a;
+logic [31:0]DP3_write_data_a; // Write DP
+logic [31:0]DP3_read_data_a;
+
+logic [31:0]S_ACC_one;
+logic [31:0]S_ACC_two;
+logic [31:0]S_ACC_three;
+logic [31:0]S_ACC_four;
+
+
+//  for write S
+logic[31:0] S1_buf;
+logic[31:0] S2_buf;
+logic[17:0] M2_write_address;
+logic [7:0] Result_S1;
+logic [7:0] Result_S2;
+
+dual_port_RAM RAM_one (  //  For S' value  ### need to initialize
+	.address_a (DP1_addr_a),
+	.address_b (DP1_addr_b),
+	.clock (CLOCK_50_I),
+	.data_a (DP1_write_data_a), 
+	.data_b (DP1_write_data_b),
+	.wren_a (DP1_we_n_a),
+	.wren_b (DP1_we_n_b),
+	.q_a (DP1_read_data_a), 
+	.q_b (DP1_read_data_b) 
+	);
+	
+dual_port_RAM RAM_two ( //  For T value ### need to initialize
+.address_a (DP2_addr_a),
+.address_b (DP2_addr_b),
+.clock ( CLOCK_50_I ),
+.data_a (DP2_write_data_a), 
+.data_b (DP2_write_data_b),
+.wren_a (DP2_we_n_a),
+.wren_b (DP2_we_n_b),
+.q_a (DP2_read_data_a), 
+.q_b (DP2_read_data_b) 
+);
+	
+dual_port_RAM RAM_threee ( // For S value ### need to initialize
+	.address_a (DP3_addr_a),
+	.address_b (DP3_addr_b),
+	.clock ( CLOCK_50_I ),
+	.data_a (DP3_write_data_a), 
+	.data_b (DP3_write_data_b),
+	.wren_a (DP3_we_n_a),
+	.wren_b (DP3_we_n_b),
+	.q_a (DP3_read_data_a), 
+	.q_b (DP3_read_data_b) 
+);
+
+always @ (posedge CLOCK_50_I or negedge resetn) begin
+	if (~resetn) begin
+		M2_state <= M2_IDLE;
+		
+		////UNIVERISAL VARABILE
+		half_flag <=1'b0;
+		State_counter <=7'd0;
+		MEGA_state_counter <= 13'd0;
+		
+		col_base<=6'd0;
+		S_base<= 18'd0;
+		
+		//For Fetch YUV
+		First_Fetch <=1'b0;
+		fetch_col_i<=3'd0;
+		fetch_row_i<=3'd0;
+		fetch_col_b<=6'd0;
+		fetch_row_b<=5'd0;
+		
+		DP1_addr_b <= 7'd0;
+		DP1_addr_a <=7'd0;
+		DP1_we_n_a <= 1'd0;
+		DP1_we_n_b <= 1'd0;
+		
+		Y_base<= 18'd76800;
+
+		
+		// for Compute T
+		First_Write <=1'b0;
+		C_col_i1 <= 3'd0;
+		C_col_i2<= 3'd0;
+		C_col_i3<= 3'd0;
+		C_col_i4<= 3'd0;
+		ROW_INDEX<= 3'd0;
+		
+		Twrite_buf[0] <= 32'd0;
+		Twrite_buf[1] <= 32'd0;
+		Twrite_buf[2] <= 32'd0;
+		Twrite_buf[3] <= 32'd0;
+		
+		CX1<=32'd0;
+		CX2<=32'd0;
+		CX3<=32'd0;
+		CX4<=32'd0;
+		
+		DP2_addr_b <= 7'd0;
+		DP2_addr_a <=7'd0;
+		DP2_we_n_a <= 1'd0;
+		DP2_we_n_b <= 1'd0;
+		
+		T_ACC_one <= 32'd0;
+		T_ACC_two<= 32'd0;
+		T_ACC_three<= 32'd0;
+		T_ACC_four<= 32'd0;
+		
+		Twrite_buf[0] <= 32'd0;
+		Twrite_buf[1] <= 32'd0;
+		Twrite_buf[2] <= 32'd0;
+		Twrite_buf[3] <= 32'd0;
+		
+		
+		
+		S_ACC_one <= 32'd0;
+		S_ACC_two<= 32'd0;
+		S_ACC_three<= 32'd0;
+		
+		S_ACC_four<= 32'd0;
+		
+		Swrite_buf[0] <= 32'd0;
+		Swrite_buf[1] <= 32'd0;
+		Swrite_buf[2] <= 32'd0;
+		Swrite_buf[3] <= 32'd0;
+		
+		
+		DP3_addr_b <= 7'd0;
+		DP3_addr_a <= 7'd0;
+		DP3_we_n_a <= 1'd0;
+		DP3_we_n_b <= 1'd0;
+		
+		S_row <= 3'd0;
+		S_col <= 3'd0;
+				
+		M2_SRAM_address <= 18'd0;
+	// for Write s
+		S1_buf <= 32'd0;
+		S2_buf <= 32'd0;
+		M2_write_address <= 18'd0;
+		
+	end else begin
+		case(M2_state)
+		
+			M2_IDLE:begin
+				if(milestone_two_stop == 1'b1)begin
+					M2_SRAM_we_n <= 1'b1;
+					M2_state <= M2_IDLE;
+				end else
+				if(milestone_two_start == 1'b1) begin
+					M2_state <= M2_FECTCH_S_LEAD_IN_0;
+					S_base <= Y_base;
+					DP1_we_n_b <= 1'd0;
+					M2_SRAM_we_n <= 1'd1;
+				end else begin
+					M2_state <= M2_IDLE;
+				end
+				
+			end
+			
+			M2_FECTCH_S_LEAD_IN_0:begin
+				fetch_col_i <= 3'd1;
+				fetch_row_i <= 3'd0;
+				fetch_col_b <= 6'd0;
+				fetch_row_b <= 5'd0;
+				M2_SRAM_address <= M2_READ_address;
+				M2_state <= M2_FECTCH_S_LEAD_IN_1;
+			end
+			
+			M2_FECTCH_S_LEAD_IN_1:begin
+				fetch_col_i <= 3'd2;
+				fetch_row_i <= 3'd0;
+				fetch_col_b <= 6'd0;
+				fetch_row_b <= 5'd0;
+
+				M2_SRAM_address <= M2_READ_address;
+				M2_state <= M2_FECTCH_S_LEAD_IN_2;
+			end
+			
+			M2_FECTCH_S_LEAD_IN_2:begin
+				fetch_col_i <= 3'd3;
+				fetch_row_i <= 3'd0;
+				fetch_col_b <= 6'd0;
+				fetch_row_b <= 5'd0;
+
+				M2_SRAM_address <= M2_READ_address;
+				State_counter <= 7'd0;
+				M2_state <= M2_FECTCH_S_LEAD_IN_3;
+				
+			end
+			
+			M2_FECTCH_S_LEAD_IN_3:begin
+				// preapre to write
+
+				DP1_we_n_b <= 1'b1;
+				M2_SRAM_address <= M2_READ_address;
+				DP1_write_data_b <= $signed(SRAM_read_data); // write to DP ram1
+				M2_state <= M2_FECTCH_S_COMMON_0;
+				fetch_col_i <= fetch_col_i + 3'd1;
+			end
+			
+			M2_FECTCH_S_COMMON_0:begin
+				
+				
+				if(fetch_col_i == 3'd7)begin
+					fetch_row_i <= fetch_row_i + 3'd1;
+					fetch_col_i <= 3'd0;
+				end else begin
+					fetch_col_i <= fetch_col_i + 3'd1;
+				end
+			
+				if(fetch_row_i == 3'd7 && fetch_col_i == 3'd7) begin
+					fetch_col_b <= fetch_col_b + 6'd1;
+					fetch_row_i <=3'd0;		
+				end
+
+				
+				
+				M2_SRAM_address <= M2_READ_address;
+				DP1_write_data_b <= $signed(SRAM_read_data); // write to DP ram1
+				DP1_addr_b <= DP1_addr_b + 7'd1;
+				
+				if(State_counter < 7'd60)begin // need to change number
+					State_counter <= State_counter + 7'd1;		
+					M2_state <=M2_FECTCH_S_COMMON_0;
+				end else begin 
+					M2_state <=M2_FECTCH_S_LEAD_OUT_0;
+				end
+			end
+			
+			M2_FECTCH_S_LEAD_OUT_0: begin
+				// Write into DP ram
+				
+				DP1_we_n_b <= 1'b1;
+				DP1_addr_b <= DP1_addr_b + 7'd1;
+				DP1_write_data_b <= $signed(SRAM_read_data); // write to DP ram1
+
+				M2_state <=M2_FETCH_S_LEAD_OUT_1;
+			end
+			
+			M2_FETCH_S_LEAD_OUT_1 : begin
+				
+				DP1_we_n_b <= 1'b1;
+				DP1_addr_b <= DP1_addr_b + 7'd1;
+				DP1_write_data_b <= $signed(SRAM_read_data); // write to DP ram1
+				
+				if(fetch_row_i == 3'd7 && fetch_col_i == 3'd7) begin
+					fetch_col_b <= fetch_col_b + 6'd1;
+					fetch_row_i <=3'd0;		
+				end
+				
+				if(fetch_col_b == 6'd39) begin
+					fetch_row_b <= fetch_row_b + 5'd1;
+					fetch_col_b <= 6'd0;
+				end
+				
+				if(fetch_row_b == 5'd29)begin
+					fetch_col_i <= 3'd0;
+					fetch_row_i <= 3'd0;
+					fetch_col_b <= 6'd0;
+					fetch_row_b <= 5'd0;
+				end
+				
+				M2_state <=M2_FETCH_S_LEAD_OUT_2;
+				
+			end
+			
+			M2_FETCH_S_LEAD_OUT_2 : begin
+			
+				DP1_we_n_b <= 1'b1;
+				DP1_addr_b <= DP1_addr_b + 7'd1;
+				DP1_write_data_b <= $signed(SRAM_read_data); // write to DP ram1
+				
+				CT_flag <= 1'b1;
+				CS_flag <= 1'b0;
+				
+				DP1_addr_a <=7'd0;
+				DP1_we_n_a <= 1'b0;
+				//Stop Wite to DP1 Prepare to Read
+				DP1_we_n_b <= 1'b0;
+				M2_state <=M2_COMPUTE_T_LEAD_IN_0;
+				
+			end
+			
+			//First compute T begins****************************************************************************************************
+			M2_COMPUTE_T_LEAD_IN_0: begin
+				
+				
+				// update address after read
+				DP1_addr_a <= DP1_addr_a + 7'd1;	
+				// assign col_i
+				C_col_i1 <= 3'd0;
+				C_col_i2 <= C_col_i1  + 3'd1;
+				C_col_i3 <= C_col_i1  + 3'd2;
+				C_col_i4 <= C_col_i1  + 3'd3;
+				
+				ROW_INDEX <= 3'd0;
+				half_flag <= 1'b0;
+				
+				M2_state <= M2_COMPUTE_T_LEAD_IN_1;
+			end
+			M2_COMPUTE_T_LEAD_IN_1: begin
+				// read S' dta from DP1
+				DP1_addr_a <= DP1_addr_a + 7'd1;			
+			   S_P <= $signed(DP1_read_data_a);
+				// assign muliliers
+				CX1 <= $signed(mult1);
+				CX2 <= $signed(mult2);
+				CX3 <= $signed(mult3);
+				CX4 <= $signed(mult4);
+			
+				// assign col_i
+				C_col_i1 <= 3'd0;
+				C_col_i2 <= C_col_i1  + 3'd1;
+				C_col_i3 <= C_col_i1  + 3'd2;
+				C_col_i4 <= C_col_i1  + 3'd3;
+				
+				ROW_INDEX <= ROW_INDEX + 3'd1;
+				
+				M2_state <= M2_COMPUTE_T_LEAD_IN_2;
+			end
+			M2_COMPUTE_T_LEAD_IN_2: begin
+			
+				// read S' dta from DP1
+				DP1_addr_a <= DP1_addr_a + 7'd1;
+				
+			   S_P <= $signed(DP1_read_data_a);
+				
+				// assign muliliers
+				CX1 <= $signed(mult1);
+				CX2 <= $signed(mult2);
+				CX3 <= $signed(mult3);
+				CX4 <= $signed(mult4);
+			
+				// assign col_i
+				C_col_i1 <= 3'd0;
+				C_col_i2 <= C_col_i1  + 3'd1;
+				C_col_i3 <= C_col_i1  + 3'd2;
+				C_col_i4 <= C_col_i1  + 3'd3;
+				
+				ROW_INDEX <= ROW_INDEX + 3'd1;
+				
+				// increment accmulartor
+				T_ACC_one <= T_ACC_one + Result_one;
+				T_ACC_two <= T_ACC_two + Result_two;
+				T_ACC_three <= T_ACC_three + Result_three;
+				T_ACC_four <= T_ACC_four + Result_four;
+				
+				M2_state <= M2_COMPUTE_T_LEAD_IN_3;
+			end
+			M2_COMPUTE_T_LEAD_IN_3: begin
+			
+				// read S' dta from DP1
+				DP1_addr_a <= DP1_addr_a + 7'd1;
+				
+			   S_P <= $signed(DP1_read_data_a);
+				
+				// assign muliliers
+				CX1 <= $signed(mult1);
+				CX2 <= $signed(mult2);
+				CX3 <= $signed(mult3);
+				CX4 <= $signed(mult4);
+			
+				// assign col_i
+				C_col_i1 <= 3'd0;
+				C_col_i2 <= C_col_i1  + 3'd1;
+				C_col_i3 <= C_col_i1  + 3'd2;
+				C_col_i4 <= C_col_i1  + 3'd3;
+				
+				ROW_INDEX <= ROW_INDEX + 3'd1;
+				
+				// increment accmulartor
+				T_ACC_one <= T_ACC_one + Result_one;
+				T_ACC_two <= T_ACC_two + Result_two;
+				T_ACC_three <= T_ACC_three + Result_three;
+				T_ACC_four <= T_ACC_four + Result_four;
+	
+	
+				M2_state <= M2_COMPUTE_T_LEAD_IN_4;
+			end
+			M2_COMPUTE_T_LEAD_IN_4: begin
+				
+				// read S' dta from DP1
+				DP1_addr_a <= DP1_addr_a + 7'd1;
+				
+			   S_P <= $signed(DP1_read_data_a);
+				
+				// assign muliliers
+				CX1 <= $signed(mult1);
+				CX2 <= $signed(mult2);
+				CX3 <= $signed(mult3);
+				CX4 <= $signed(mult4);
+			
+				// assign col_i
+				C_col_i1 <= 3'd0;
+				C_col_i2 <= C_col_i1  + 3'd1;
+				C_col_i3 <= C_col_i1  + 3'd2;
+				C_col_i4 <= C_col_i1  + 3'd3;
+				
+				ROW_INDEX <= ROW_INDEX + 3'd1;
+				
+				// increment accmulartor
+				T_ACC_one <= T_ACC_one + Result_one;
+				T_ACC_two <= T_ACC_two + Result_two;
+				T_ACC_three <= T_ACC_three + Result_three;
+				T_ACC_four <= T_ACC_four + Result_four;
+	
+				
+				M2_state <= M2_COMPUTE_T_LEAD_IN_5;
+			end
+			M2_COMPUTE_T_LEAD_IN_5: begin
+				
+				// read S' dta from DP1
+				DP1_addr_a <= DP1_addr_a + 7'd1;
+				
+			   S_P <= $signed(DP1_read_data_a);
+				
+				// assign muliliers
+				CX1 <= $signed(mult1);
+				CX2 <= $signed(mult2);
+				CX3 <= $signed(mult3);
+				CX4 <= $signed(mult4);
+			
+				// assign col_i
+				C_col_i1 <= 3'd0;
+				C_col_i2 <= C_col_i1  + 3'd1;
+				C_col_i3 <= C_col_i1  + 3'd2;
+				C_col_i4 <= C_col_i1  + 3'd3;
+				
+				ROW_INDEX <= ROW_INDEX + 3'd1;
+				
+				// increment accmulartor
+				T_ACC_one <= T_ACC_one + Result_one;
+				T_ACC_two <= T_ACC_two + Result_two;
+				T_ACC_three <= T_ACC_three + Result_three;
+				T_ACC_four <= T_ACC_four + Result_four;
+	
+	
+				M2_state <= M2_COMPUTE_T_LEAD_IN_6;
+			end
+			M2_COMPUTE_T_LEAD_IN_6: begin
+			
+				// read S' dta from DP1
+				DP1_addr_a <= DP1_addr_a  + 6'd1;
+				
+			   S_P <= $signed(DP1_read_data_a);
+				
+				// assign muliliers
+				CX1 <= $signed(mult1);
+				CX2 <= $signed(mult2);
+				CX3 <= $signed(mult3);
+				CX4 <= $signed(mult4);
+			
+				// assign col_i
+				C_col_i1 <= 3'd0;
+				C_col_i2 <= C_col_i1  + 3'd1;
+				C_col_i3 <= C_col_i1  + 3'd2;
+				C_col_i4 <= C_col_i1  + 3'd3;
+				
+				ROW_INDEX <= ROW_INDEX + 3'd1;
+				// reset half_flag
+				half_flag <= ~half_flag;
+				
+				// increment accmulartor
+				T_ACC_one <= T_ACC_one + Result_one;
+				T_ACC_two <= T_ACC_two + Result_two;
+				T_ACC_three <= T_ACC_three + Result_three;
+				T_ACC_four <= T_ACC_four + Result_four;
+	
+	
+				M2_state <= M2_COMPUTE_T_LEAD_IN_7;
+			end
+			M2_COMPUTE_T_LEAD_IN_7: begin
+			
+				// read S' dta from DP1
+				if(half_flag == 1) begin
+					DP1_addr_a <=DP1_addr_a - 7'd7;
+				end else begin
+					DP1_addr_a <= DP1_addr_a  + 7'd1;
+				end
+			   S_P <= $signed(DP1_read_data_a);
+				
+				// assign muliliers
+				CX1 <= $signed(mult1);
+				CX2 <= $signed(mult2);
+				CX3 <= $signed(mult3);
+				CX4 <= $signed(mult4);
+			
+				// assign col_i
+				if(half_flag == 1'b0)begin
+					C_col_i1 <= 3'd0;
+				end else begin
+					C_col_i1 <= 3'd4;
+				end
+				
+				C_col_i2 <= C_col_i1  + 3'd1;
+				C_col_i3 <= C_col_i1  + 3'd2;
+				C_col_i4 <= C_col_i1  + 3'd3;
+				
+				ROW_INDEX <= ROW_INDEX + 3'd1;
+				
+				State_counter <= 7'd0;
+				// increment accmulartor
+				T_ACC_one <= T_ACC_one + Result_one;
+				T_ACC_two <= T_ACC_two + Result_two;
+				T_ACC_three <= T_ACC_three + Result_three;
+				T_ACC_four <= T_ACC_four + Result_four;
+				
+				First_Write <= 1'b1;
+	
+				M2_state <= M2_COMPUTE_T_COMMON_0;
+			end
+			
+			M2_COMPUTE_T_COMMON_0 : begin
+			
+				DP1_addr_a <= DP1_addr_a  + 7'd1;
+			   S_P <= $signed(DP1_read_data_a);
+				
+				// assign muliliers
+				CX1 <= $signed(mult1);
+				CX2 <= $signed(mult2);
+				CX3 <= $signed(mult3);
+				CX4 <= $signed(mult4);
+			
+				
+				
+				C_col_i2 <= C_col_i1  + 3'd1;
+				C_col_i3 <= C_col_i1  + 3'd2;
+				C_col_i4 <= C_col_i1  + 3'd3;
+				
+				ROW_INDEX <= 3'd0;
+				
+				
+				// increment accmulartor
+				T_ACC_one <= T_ACC_one + Result_one;
+				T_ACC_two <= T_ACC_two + Result_two;
+				T_ACC_three <= T_ACC_three + Result_three;
+				T_ACC_four <= T_ACC_four + Result_four;
+				
+				M2_state <= M2_COMPUTE_T_COMMON_1;
+				
+			end
+			
+			 M2_COMPUTE_T_COMMON_1:begin
+				// read S' dta from DP1
+				DP1_addr_a <= DP1_addr_a + 7'd1;
+			   S_P <= $signed(DP1_read_data_a);
+				
+				// assign muliliers
+				CX1 <= $signed(mult1);
+				CX2 <= $signed(mult2);
+				CX3 <= $signed(mult3);
+				CX4 <= $signed(mult4);
+			
+				// assign col_i
+				
+				
+				C_col_i2 <= C_col_i1  + 3'd1;
+				C_col_i3 <= C_col_i1  + 3'd2;
+				C_col_i4 <= C_col_i1  + 3'd3;
+				
+				ROW_INDEX <= ROW_INDEX + 3'd1;
+				
+				// increment accmulartor
+				T_ACC_one <=  Result_one;
+				T_ACC_two <=  Result_two;
+				T_ACC_three <= Result_three;
+				T_ACC_four <= Result_four;
+				
+				Twrite_buf[0] <= Result_T_one;
+				Twrite_buf[1] <= Result_T_two;
+				Twrite_buf[2] <= Result_T_three;
+				Twrite_buf[3] <= Result_T_four;
+				
+				
+				M2_state <= M2_COMPUTE_T_COMMON_2;
+			end
+			
+			M2_COMPUTE_T_COMMON_2 : begin
+				// read S' dta from DP1
+				DP1_addr_a <= DP1_addr_a + 7'd1;
+				
+			   S_P <= $signed(DP1_read_data_a);
+				
+				// assign muliliers
+				CX1 <= $signed(mult1);
+				CX2 <= $signed(mult2);
+				CX3 <= $signed(mult3);
+				CX4 <= $signed(mult4);
+			
+				// assign col_i
+				
+				
+				C_col_i2 <= C_col_i1  + 3'd1;
+				C_col_i3 <= C_col_i1  + 3'd2;
+				C_col_i4 <= C_col_i1  + 3'd3;
+				
+				ROW_INDEX <= ROW_INDEX + 3'd1;
+				
+				
+				// increment accmulartor
+				T_ACC_one <= T_ACC_one + Result_one;
+				T_ACC_two <= T_ACC_two + Result_two;
+				T_ACC_three <= T_ACC_three + Result_three;
+				T_ACC_four <= T_ACC_four + Result_four;
+				
+				// write T into DP_2;
+				// write
+				if(First_Write == 1'b1)begin
+					DP2_addr_a <= 7'd0;
+					First_Write <= 1'b0;
+				end else begin
+					DP2_addr_a <= DP2_addr_a + 7'd1;
+				end
+				
+				DP2_we_n_a <= 1'd1;
+				DP2_write_data_a <= Twrite_buf[0];
+
+				M2_state <= M2_COMPUTE_T_COMMON_3;
+				
+			end
+			
+			M2_COMPUTE_T_COMMON_3 : begin
+				// read S' dta from DP1
+				DP1_addr_a <= DP1_addr_a + 7'd1;
+				
+			   S_P <= $signed(DP1_read_data_a);
+				
+				// assign muliliers
+				CX1 <= $signed(mult1);
+				CX2 <= $signed(mult2);
+				CX3 <= $signed(mult3);
+				CX4 <= $signed(mult4);
+			
+				// assign col_i
+				
+				
+				C_col_i2 <= C_col_i1  + 3'd1;
+				C_col_i3 <= C_col_i1  + 3'd2;
+				C_col_i4 <= C_col_i1  + 3'd3;
+				
+				ROW_INDEX <= ROW_INDEX + 3'd1;
+				
+				
+				// increment accmulartor
+				T_ACC_one <= T_ACC_one + Result_one;
+				T_ACC_two <= T_ACC_two + Result_two;
+				T_ACC_three <= T_ACC_three + Result_three;
+				T_ACC_four <= T_ACC_four + Result_four;
+				
+				// write T into DP_2;
+				DP2_addr_a <= DP2_addr_a + 7'd1;
+				DP2_we_n_a <= 1'd1;
+				DP2_write_data_a <= Twrite_buf[1];
+				
+				M2_state <= M2_COMPUTE_T_COMMON_4;
+				
+			end
+			
+			M2_COMPUTE_T_COMMON_4 : begin
+				// read S' dta from DP1
+				DP1_addr_a <= DP1_addr_a + 7'd1;
+				
+			   S_P <= $signed(DP1_read_data_a);
+				
+				// assign muliliers
+				CX1 <= $signed(mult1);
+				CX2 <= $signed(mult2);
+				CX3 <= $signed(mult3);
+				CX4 <= $signed(mult4);
+			
+				
+				
+				
+				C_col_i2 <= C_col_i1  + 3'd1;
+				C_col_i3 <= C_col_i1  + 3'd2;
+				C_col_i4 <= C_col_i1  + 3'd3;
+				
+				ROW_INDEX <= ROW_INDEX + 3'd1;
+				
+				
+				// increment accmulartor
+				T_ACC_one <= T_ACC_one + Result_one;
+				T_ACC_two <= T_ACC_two + Result_two;
+				T_ACC_three <= T_ACC_three + Result_three;
+				T_ACC_four <= T_ACC_four + Result_four;
+				
+				// write T into DP_2;
+				DP2_addr_a <= DP2_addr_a + 7'd1;
+				DP2_we_n_a <= 1'd1;
+				DP2_write_data_a <= Twrite_buf[2];
+				
+				M2_state <= M2_COMPUTE_T_COMMON_5;
+				
+			end
+			
+			M2_COMPUTE_T_COMMON_5 : begin
+				// read S' dta from DP1
+				DP1_addr_a <= DP1_addr_a + 7'd1;
+				
+			   S_P <= $signed(DP1_read_data_a);
+				
+				// assign muliliers
+				CX1 <= $signed(mult1);
+				CX2 <= $signed(mult2);
+				CX3 <= $signed(mult3);
+				CX4 <= $signed(mult4);
+			
+				// assign col_i
+				
+				
+				C_col_i2 <= C_col_i1  + 3'd1;
+				C_col_i3 <= C_col_i1  + 3'd2;
+				C_col_i4 <= C_col_i1  + 3'd3;
+				
+				ROW_INDEX <= ROW_INDEX + 3'd1;
+				
+				
+				// increment accmulartor
+				T_ACC_one <= T_ACC_one + Result_one;
+				T_ACC_two <= T_ACC_two + Result_two;
+				T_ACC_three <= T_ACC_three + Result_three;
+				T_ACC_four <= T_ACC_four + Result_four;
+				
+				// turn off DP2
+				DP2_addr_a <= DP2_addr_a + 7'd1;
+				DP2_we_n_a <= 1'd1;
+				DP2_write_data_a <= Twrite_buf[3];
+				M2_state <= M2_COMPUTE_T_COMMON_6;
+				
+			end
+			
+			M2_COMPUTE_T_COMMON_6 : begin
+				// read S' dta from DP1
+				DP1_addr_a <= DP1_addr_a + 7'd1;
+				
+				
+			   S_P <= $signed(DP1_read_data_a);
+				
+				// assign muliliers
+				CX1 <= $signed(mult1);
+				CX2 <= $signed(mult2);
+				CX3 <= $signed(mult3);
+				CX4 <= $signed(mult4);
+			
+				// assign col_i
+				
+				
+				C_col_i2 <= C_col_i1  + 3'd1;
+				C_col_i3 <= C_col_i1  + 3'd2;
+				C_col_i4 <= C_col_i1  + 3'd3;
+				
+				ROW_INDEX <= ROW_INDEX + 3'd1;
+				
+				// reset half_flag
+				half_flag <= ~half_flag;
+				// increment accmulartor
+				T_ACC_one <= T_ACC_one + Result_one;
+				T_ACC_two <= T_ACC_two + Result_two;
+				T_ACC_three <= T_ACC_three + Result_three;
+				T_ACC_four <= T_ACC_four + Result_four;
+				
+				// read
+				DP2_we_n_a <= 1'd0;
+				
+				M2_state <= M2_COMPUTE_T_COMMON_7;
+				
+			end
+			
+			M2_COMPUTE_T_COMMON_7 : begin
+				// read S' dta from DP1
+				if(half_flag == 1) begin
+					DP1_addr_a <=DP1_addr_a - 7'd7;
+				end else begin
+					DP1_addr_a <= DP1_addr_a  + 7'd1;
+				end
+				
+			   S_P <= $signed(DP1_read_data_a);
+				
+				// assign muliliers
+				CX1 <= $signed(mult1);
+				CX2 <= $signed(mult2);
+				CX3 <= $signed(mult3);
+				CX4 <= $signed(mult4);
+				
+				
+				// assign col_i
+				if(half_flag == 1'b0)begin
+					C_col_i1 <= 3'd0;
+				end else begin
+					C_col_i1 <= 3'd4;
+				end
+				
+				C_col_i2 <= C_col_i1  + 3'd1;
+				C_col_i3 <= C_col_i1  + 3'd2;
+				C_col_i4 <= C_col_i1  + 3'd3;
+				
+				ROW_INDEX <= ROW_INDEX + 3'd1;
+				
+				//update state_counter
+				
+				// increment accmulartor
+				T_ACC_one <= T_ACC_one + Result_one;
+				T_ACC_two <= T_ACC_two + Result_two;
+				T_ACC_three <= T_ACC_three + Result_three;
+				T_ACC_four <= T_ACC_four + Result_four;
+					
+				
+				if(State_counter <= 7'd12)begin
+					State_counter <= State_counter + 7'd1;
+					M2_state <= M2_COMPUTE_T_COMMON_0;
+				end else begin
+					M2_state <= M2_COMPUTE_T_LEAD_OUT_0;
+					State_counter <= 7'd0;
+				end
+			end	
+			M2_COMPUTE_T_LEAD_OUT_0 :begin
+
+				DP1_addr_a <= DP1_addr_a  + 7'd1;
+				
+			   S_P <= $signed(DP1_read_data_a);
+				
+				// assign muliliers
+				CX1 <= $signed(mult1);
+				CX2 <= $signed(mult2);
+				CX3 <= $signed(mult3);
+				CX4 <= $signed(mult4);
+			
+				// assign col_i
+				if(half_flag == 1'b0)begin
+					C_col_i1 <= 3'd0;
+				end else begin
+					C_col_i1 <= 3'd4;
+				end
+				
+				C_col_i2 <= C_col_i1  + 3'd1;
+				C_col_i3 <= C_col_i1  + 3'd2;
+				C_col_i4 <= C_col_i1  + 3'd3;
+				
+				ROW_INDEX <=  3'd0;
+				
+				// increment accmulartor
+				T_ACC_one <= T_ACC_one + Result_one;
+				T_ACC_two <= T_ACC_two + Result_two;
+				T_ACC_three <= T_ACC_three + Result_three;
+				T_ACC_four <= T_ACC_four + Result_four;
+				
+				M2_state <= M2_COMPUTE_T_LEAD_OUT_1;
+			end
+			
+			M2_COMPUTE_T_LEAD_OUT_1 :begin
+				// read S' dta from DP1
+				DP1_addr_a <= DP1_addr_a + 7'd1;
+				
+			   S_P <= $signed(DP1_read_data_a);
+				
+				// assign muliliers
+				CX1 <= $signed(mult1);
+				CX2 <= $signed(mult2);
+				CX3 <= $signed(mult3);
+				CX4 <= $signed(mult4);
+			
+				// assign col_i
+				if(half_flag == 1'b0)begin
+					C_col_i1 <= 3'd0;
+				end else begin
+					C_col_i1 <= 3'd4;
+				end
+				
+				C_col_i2 <= C_col_i1  + 3'd1;
+				C_col_i3 <= C_col_i1  + 3'd2;
+				C_col_i4 <= C_col_i1  + 3'd3;
+				
+				ROW_INDEX <= ROW_INDEX + 3'd1;
+				
+				// increment accmulartor
+				T_ACC_one <=  Result_one;
+				T_ACC_two <= Result_two;
+				T_ACC_three <=  Result_three;
+				T_ACC_four <=  Result_four;
+				
+				Twrite_buf[0] <= Result_T_one;
+				Twrite_buf[1] <= Result_T_two;
+				Twrite_buf[2] <= Result_T_three;
+				Twrite_buf[3] <= Result_T_four;
+				
+				M2_state <= M2_COMPUTE_T_LEAD_OUT_2;
+			end
+			
+			M2_COMPUTE_T_LEAD_OUT_2 :begin
+				// read S' dta from DP1
+				DP1_addr_a <= DP1_addr_a + 7'd1;
+				
+			   S_P <= $signed(DP1_read_data_a);
+				
+				// assign muliliers
+				CX1 <= $signed(mult1);
+				CX2 <= $signed(mult2);
+				CX3 <= $signed(mult3);
+				CX4 <= $signed(mult4);
+			
+				// assign col_i
+				if(half_flag == 1'b0)begin
+					C_col_i1 <= 3'd0;
+				end else begin
+					C_col_i1 <= 3'd4;
+				end
+				
+				C_col_i2 <= C_col_i1  + 3'd1;
+				C_col_i3 <= C_col_i1  + 3'd2;
+				C_col_i4 <= C_col_i1  + 3'd3;
+				
+				ROW_INDEX <= ROW_INDEX + 3'd1;
+				
+				// increment accmulartor
+				T_ACC_one <= T_ACC_one + Result_one;
+				T_ACC_two <= T_ACC_two + Result_two;
+				T_ACC_three <= T_ACC_three + Result_three;
+				T_ACC_four <= T_ACC_four + Result_four;
+				
+				// write T[0]
+				DP2_addr_a <= DP2_addr_a + 7'd1;
+				DP2_we_n_a <= 1'd1;
+				
+				DP2_write_data_a <= Twrite_buf[0];
+				
+				M2_state <= M2_COMPUTE_T_LEAD_OUT_3;
+				
+			end
+			
+				M2_COMPUTE_T_LEAD_OUT_3 :begin
+				// read S' dta from DP1
+				DP1_addr_a <= DP1_addr_a + 7'd1;
+				
+			   S_P <= $signed(DP1_read_data_a);
+				
+				// assign muliliers
+				CX1 <= $signed(mult1);
+				CX2 <= $signed(mult2);
+				CX3 <= $signed(mult3);
+				CX4 <= $signed(mult4);
+			
+				// assign col_i
+				if(half_flag == 1'b0)begin
+					C_col_i1 <= 3'd0;
+				end else begin
+					C_col_i1 <= 3'd4;
+				end
+				
+				C_col_i2 <= C_col_i1  + 3'd1;
+				C_col_i3 <= C_col_i1  + 3'd2;
+				C_col_i4 <= C_col_i1  + 3'd3;
+				
+				ROW_INDEX <= ROW_INDEX + 3'd1;
+				
+				// increment accmulartor
+				T_ACC_one <= T_ACC_one + Result_one;
+				T_ACC_two <= T_ACC_two + Result_two;
+				T_ACC_three <= T_ACC_three + Result_three;
+				T_ACC_four <= T_ACC_four + Result_four;
+				
+				// write T[0]
+				DP2_addr_a <= DP2_addr_a + 7'd1;
+				DP2_we_n_a <= 1'd1;
+				
+				DP2_write_data_a <= Twrite_buf[1];
+				
+				M2_state <= M2_COMPUTE_T_LEAD_OUT_4;
+				
+			end
+			
+			M2_COMPUTE_T_LEAD_OUT_4 :begin
+				// read S' dta from DP1
+				DP1_addr_a <= DP1_addr_a + 7'd1;
+				
+			   S_P <= $signed(DP1_read_data_a);
+				
+				// assign muliliers
+				CX1 <= $signed(mult1);
+				CX2 <= $signed(mult2);
+				CX3 <= $signed(mult3);
+				CX4 <= $signed(mult4);
+			
+				// assign col_i
+				if(half_flag == 1'b0)begin
+					C_col_i1 <= 3'd0;
+				end else begin
+					C_col_i1 <= 3'd4;
+				end
+				
+				C_col_i2 <= C_col_i1  + 3'd1;
+				C_col_i3 <= C_col_i1  + 3'd2;
+				C_col_i4 <= C_col_i1  + 3'd3;
+				
+				ROW_INDEX <= ROW_INDEX + 3'd1;
+				
+				// increment accmulartor
+				T_ACC_one <= T_ACC_one + Result_one;
+				T_ACC_two <= T_ACC_two + Result_two;
+				T_ACC_three <= T_ACC_three + Result_three;
+				T_ACC_four <= T_ACC_four + Result_four;
+				
+				// write T[0]
+				DP2_addr_a <= DP2_addr_a + 7'd1;
+				DP2_we_n_a <= 1'd1;
+				
+				DP2_write_data_a <= Twrite_buf[2];
+				
+				M2_state <= M2_COMPUTE_T_LEAD_OUT_5;
+				
+			end
+			
+			M2_COMPUTE_T_LEAD_OUT_5 :begin
+				// read S' dta from DP1
+				DP1_addr_a <= DP1_addr_a + 7'd1;
+				
+			   S_P <= $signed(DP1_read_data_a);
+				
+				// assign muliliers
+				CX1 <= $signed(mult1);
+				CX2 <= $signed(mult2);
+				CX3 <= $signed(mult3);
+				CX4 <= $signed(mult4);
+			
+				// assign col_i
+				if(half_flag == 1'b0)begin
+					C_col_i1 <= 3'd0;
+				end else begin
+					C_col_i1 <= 3'd4;
+				end
+				
+				C_col_i2 <= C_col_i1  + 3'd1;
+				C_col_i3 <= C_col_i1  + 3'd2;
+				C_col_i4 <= C_col_i1  + 3'd3;
+				
+				ROW_INDEX <= ROW_INDEX + 3'd1;
+				
+				// increment accmulartor
+				T_ACC_one <= T_ACC_one + Result_one;
+				T_ACC_two <= T_ACC_two + Result_two;
+				T_ACC_three <= T_ACC_three + Result_three;
+				T_ACC_four <= T_ACC_four + Result_four;
+				
+				// write T[0]
+				DP2_addr_a <= DP2_addr_a + 7'd1;
+				DP2_we_n_a <= 1'd1;
+				
+				DP2_write_data_a <= Twrite_buf[3];
+				
+				M2_state <= M2_COMPUTE_T_LEAD_OUT_6;
+				
+				// initialize for MEGA FETCH_S
+				fetch_col_i<=3'd0;
+				fetch_row_i<=3'd0;
+				
+				
+			end
+			
+			M2_COMPUTE_T_LEAD_OUT_6 :begin
+				// read S' dta from DP1
+				DP1_addr_a <= DP1_addr_a + 7'd1;
+				half_flag <= ~half_flag;
+			   S_P <= $signed(DP1_read_data_a);
+				
+				// assign muliliers
+				CX1 <= $signed(mult1);
+				CX2 <= $signed(mult2);
+				CX3 <= $signed(mult3);
+				CX4 <= $signed(mult4);
+			
+				// assign col_i
+				if(half_flag == 1'b0)begin
+					C_col_i1 <= 3'd0;
+				end else begin
+					C_col_i1 <= 3'd4;
+				end
+				
+				
+				
+				C_col_i2 <= C_col_i1  + 3'd1;
+				C_col_i3 <= C_col_i1  + 3'd2;
+				C_col_i4 <= C_col_i1  + 3'd3;
+				
+				ROW_INDEX <= ROW_INDEX + 3'd1;
+				
+				// increment accmulartor
+				T_ACC_one <= T_ACC_one + Result_one;
+				T_ACC_two <= T_ACC_two + Result_two;
+				T_ACC_three <= T_ACC_three + Result_three;
+				T_ACC_four <= T_ACC_four + Result_four;
+				
+				//MEGA FETCH_S**********************************************************************************************************
+				
+				M2_SRAM_address <= M2_READ_address;
+				
+				// stop writing
+				DP2_we_n_a <= 1'd0;
+				
+				M2_state <= M2_COMPUTE_T_LEAD_OUT_7;
+				
+			end
+			
+			M2_COMPUTE_T_LEAD_OUT_7 :begin
+				// read S' dta from DP1
+				DP1_addr_a <= DP1_addr_a + 7'd1;
+				
+			   S_P <= $signed(DP1_read_data_a);
+				
+				// assign muliliers
+				CX1 <= $signed(mult1);
+				CX2 <= $signed(mult2);
+				CX3 <= $signed(mult3);
+				CX4 <= $signed(mult4);
+			
+				// assign col_i
+				if(half_flag == 1'b0)begin
+					C_col_i1 <= 3'd0;
+				end else begin
+					C_col_i1 <= 3'd4;
+				end
+				
+				C_col_i2 <= C_col_i1  + 3'd1;
+				C_col_i3 <= C_col_i1  + 3'd2;
+				C_col_i4 <= C_col_i1  + 3'd3;
+				
+				ROW_INDEX <= ROW_INDEX + 3'd1;
+				
+				// increment accmulartor
+				T_ACC_one <= T_ACC_one + Result_one;
+				T_ACC_two <= T_ACC_two + Result_two;
+				T_ACC_three <= T_ACC_three + Result_three;
+				T_ACC_four <= T_ACC_four + Result_four;
+						
+				//MEGA FETCH_S**********************************************************************************************************
+				fetch_col_i <= fetch_col_i + 3'd1;
+				
+				// reset first write
+				First_Write <= 1'b1;
+				// PREPARE Read_DP2
+				DP2_we_n_b <= 1'b0;
+				DP2_addr_b <= 7'd0;
+				
+				//PREPARE WRITE S' TO DP1
+				DP1_addr_b <= 7'd0;
+				
+				M2_state <= M2_MEGA_CSFS_LEAD_IN_0;
+			end
+				
+		M2_MEGA_CSFS_LEAD_IN_0 :begin
+				DP1_addr_a <=7'd0;
+				DP1_we_n_a <= 1'd0;
+				DP1_we_n_b <= 1'd0;
+				//COMPUTE S***********************************
+				// assign muliliers
+				CX1 <= $signed(mult1);
+				CX2 <= $signed(mult2);
+				CX3 <= $signed(mult3);
+				CX4 <= $signed(mult4);
+			
+				// assign col_i
+				if(half_flag == 1'b0)begin
+					C_col_i1 <= 3'd0;
+				end else begin
+					C_col_i1 <= 3'd4;
+				end
+				
+				C_col_i2 <= C_col_i1  + 3'd1;
+				C_col_i3 <= C_col_i1  + 3'd2;
+				C_col_i4 <= C_col_i1  + 3'd3;
+				
+				ROW_INDEX <= 3'd0;
+				
+				S_P <= $signed(DP1_read_data_a);
+				// increment accmulartor for previous CT
+				T_ACC_one <= T_ACC_one + Result_one;
+				T_ACC_two <= T_ACC_two + Result_two;
+				T_ACC_three <= T_ACC_three + Result_three;
+				T_ACC_four <= T_ACC_four + Result_four;
+				
+				// Read_DP2
+				DP2_addr_b <= DP2_addr_b + 7'd8; 
+				
+				// COL BASE CHANGE CONDITION REGARDING YUV
+				if(MEGA_state_counter < 13'd1199) begin
+					col_base <= 6'd39;
+					S_base <= 18'd76800;
+				end else if(MEGA_state_counter < 13'd1799) begin
+					col_base <= 6'd19;
+					S_base <= 18'd153600;
+				end else if(MEGA_state_counter < 13'd2399) begin
+					col_base <= 6'd19;
+					S_base <= 18'd192000;
+				end
+				
+				S_row <= 3'd0;
+				S_col <= 3'd0;
+				
+				//FETCH_S*****************************************
+				M2_SRAM_address <= M2_READ_address;
+				
+				M2_state <= M2_MEGA_CSFS_LEAD_IN_1;
+			end
+			
+			M2_MEGA_CSFS_LEAD_IN_1 : begin
+				// assign muliliers
+				CX1 <= $signed(mult1);
+				CX2 <= $signed(mult2);
+				CX3 <= $signed(mult3);
+				CX4 <= $signed(mult4);
+			
+				// assign col_i
+				if(half_flag == 1'b0)begin
+					C_col_i1 <= 3'd0;
+				end else begin
+					C_col_i1 <= 3'd4;
+				end
+				
+				C_col_i2 <= C_col_i1  + 3'd1;
+				C_col_i3 <= C_col_i1  + 3'd2;
+				C_col_i4 <= C_col_i1  + 3'd3;
+				
+				ROW_INDEX <= ROW_INDEX + 3'd1;
+				
+				// increment accmulartor for previous CT
+				S_ACC_one <=  Result_one;
+				S_ACC_two <= Result_two;
+				S_ACC_three <= Result_three;
+				S_ACC_four <=  Result_four;
+				
+				// take care of value from prev CT
+				Twrite_buf[0] <= Result_T_one;
+				Twrite_buf[1] <= Result_T_two;
+				Twrite_buf[2] <= Result_T_three;
+				Twrite_buf[3] <= Result_T_four;
+				
+				
+				// Read_DP2
+				DP2_addr_b <= DP2_addr_b + 7'd8; 
+				DP2_we_n_b <= 1'b0;
+				S_P <= $signed(DP2_read_data_b);
+				//FETCH_S***************************************** CHECK and PLUS ONE
+				if(fetch_col_i == 3'd7)begin
+					fetch_row_i <= fetch_row_i + 3'd1;
+					fetch_col_i <= 3'd0;
+				end else begin
+					fetch_col_i <= fetch_col_i + 3'd1;
+				end
+				
+				if(fetch_row_i == 3'd7 && fetch_col_i == 3'd7) begin
+					fetch_col_b <= fetch_col_b + 6'd1;
+					fetch_row_i <=3'd0;		
+				end
+				
+				if(fetch_col_b == col_base) begin
+					fetch_row_b <= fetch_row_b + 5'd1;
+					fetch_col_b <= 6'd0;
+				end
+				
+				if(fetch_row_b == 5'd29)begin
+					fetch_col_i <= 3'd0;
+					fetch_row_i <= 3'd0;
+					fetch_col_b <= 6'd0;
+					fetch_row_b <= 5'd0;
+				end
+				
+				// write to SRAM_address
+				// Write into DP ram
+				DP1_we_n_b <= 1'b1;
+				DP1_write_data_b <= $signed(SRAM_read_data); // write to DP ram1
+				DP1_addr_b <= 7'd0;
+				
+				
+				M2_state <= M2_MEGA_CSFS_LEAD_IN_2;
+			end
+			
+			M2_MEGA_CSFS_LEAD_IN_2 : begin
+				// assign muliliers
+				CX1 <= $signed(mult1);
+				CX2 <= $signed(mult2);
+				CX3 <= $signed(mult3);
+				CX4 <= $signed(mult4);
+				
+				// assign col_i
+				if(half_flag == 1'b0)begin
+					C_col_i1 <= 3'd0;
+				end else begin
+					C_col_i1 <= 3'd4;
+				end
+				
+				C_col_i2 <= C_col_i1  + 3'd1;
+				C_col_i3 <= C_col_i1  + 3'd2;
+				C_col_i4 <= C_col_i1  + 3'd3;
+				
+				ROW_INDEX <= ROW_INDEX + 3'd1;
+				
+				// increment accmulartor for previous CT
+				S_ACC_one <= S_ACC_one + Result_one;
+				S_ACC_two <= S_ACC_two + Result_two;
+				S_ACC_three <= S_ACC_three + Result_three;
+				S_ACC_four <= S_ACC_four + Result_four;
+				
+				
+				// Read_DP2 T
+				DP2_we_n_b <= 1'b0;
+				DP2_addr_b <= DP2_addr_b + 7'd8;
+				S_P <= $signed(DP2_read_data_b);
+				// Write Lefted T
+				DP2_we_n_a <= 1'b1;
+				DP2_write_data_a <= Twrite_buf[0];
+				DP2_addr_a <= DP2_addr_a + 7'd1;
+				
+				//FETCH_S*****************************************
+				DP1_we_n_b <= 1'b0;
+				M2_SRAM_address <= M2_READ_address;
+				
+				M2_state <= M2_MEGA_CSFS_LEAD_IN_3;
+			end
+			
+			M2_MEGA_CSFS_LEAD_IN_3 : begin
+				//COMPUTE S***********************************
+				// assign muliliers
+				CX1 <= $signed(mult1);
+				CX2 <= $signed(mult2);
+				CX3 <= $signed(mult3);
+				CX4 <= $signed(mult4);
+				
+				// assign col_i
+				// assign col_i
+				if(half_flag == 1'b0)begin
+					C_col_i1 <= 3'd0;
+				end else begin
+					C_col_i1 <= 3'd4;
+				end
+				
+				C_col_i2 <= C_col_i1  + 3'd1;
+				C_col_i3 <= C_col_i1  + 3'd2;
+				C_col_i4 <= C_col_i1  + 3'd3;
+				
+				ROW_INDEX <= ROW_INDEX + 3'd1;
+				
+				// increment accmulartor for previous CT
+				S_ACC_one <= S_ACC_one + Result_one;
+				S_ACC_two <= S_ACC_two + Result_two;
+				S_ACC_three <= S_ACC_three + Result_three;
+				S_ACC_four <= S_ACC_four + Result_four;
+				
+				// Read_DP2
+				DP2_we_n_b <= 1'b0;
+				DP2_addr_b <= DP2_addr_b + 7'd8;
+				S_P <= $signed(DP2_read_data_b);
+				// Write Lefted T from CT
+				DP2_write_data_a <= Twrite_buf[1];
+				DP2_addr_a <= DP2_addr_a + 7'd1;
+				
+				//FETCH_S***************************************** CHECK and PLUS ONE
+				if(fetch_col_i == 3'd7)begin
+					fetch_row_i <= fetch_row_i + 3'd1;
+					fetch_col_i <= 3'd0;
+				end else begin
+					fetch_col_i <= fetch_col_i + 3'd1;
+				end
+				
+				if(fetch_row_i == 3'd7 && fetch_col_i == 3'd7) begin
+					fetch_col_b <= fetch_col_b + 6'd1;
+					fetch_row_i <=3'd0;		
+				end
+				
+				if(fetch_col_b == col_base) begin
+					fetch_row_b <= fetch_row_b + 5'd1;
+					fetch_col_b <= 6'd0;
+				end
+				
+				if(fetch_row_b == 5'd29)begin
+					fetch_col_i <= 3'd0;
+					fetch_row_i <= 3'd0;
+					fetch_col_b <= 6'd0;
+					fetch_row_b <= 5'd0;
+				end
+				
+				// write to SRAM_address
+				// Write into DP ram
+				DP1_we_n_b <= 1'b1;
+				DP1_write_data_b <= $signed(SRAM_read_data); // write to DP ram1
+				DP1_addr_b <= DP1_addr_b + 7'd1;
+				
+				
+				
+				M2_state <= M2_MEGA_CSFS_LEAD_IN_4;
+			end
+			
+			M2_MEGA_CSFS_LEAD_IN_4 : begin
+				// assign muliliers
+				CX1 <= $signed(mult1);
+				CX2 <= $signed(mult2);
+				CX3 <= $signed(mult3);
+				CX4 <= $signed(mult4);
+				
+				// assign col_i
+				// assign col_i
+				if(half_flag == 1'b0)begin
+					C_col_i1 <= 3'd0;
+				end else begin
+					C_col_i1 <= 3'd4;
+				end
+				
+				C_col_i2 <= C_col_i1  + 3'd1;
+				C_col_i3 <= C_col_i1  + 3'd2;
+				C_col_i4 <= C_col_i1  + 3'd3;
+				
+				ROW_INDEX <= ROW_INDEX + 3'd1;
+				
+				// increment accmulartor for previous CT
+				S_ACC_one <= S_ACC_one + Result_one;
+				S_ACC_two <= S_ACC_two + Result_two;
+				S_ACC_three <= S_ACC_three + Result_three;
+				S_ACC_four <= S_ACC_four + Result_four;
+				
+				
+				// Read_DP2 T
+				DP2_we_n_b <= 1'b0;
+				DP2_addr_b <= DP2_addr_b + 7'd8;
+				S_P <= $signed(DP2_read_data_b);
+				// Write Lefted T
+				DP2_write_data_a <= Twrite_buf[2];
+				DP2_addr_a <= DP2_addr_a + 7'd1;
+				
+				//FETCH_S*****************************************
+				
+				DP1_we_n_b <= 1'b0;
+				M2_SRAM_address <= M2_READ_address;
+				
+				M2_state <= M2_MEGA_CSFS_LEAD_IN_5;
+			end
+			
+			M2_MEGA_CSFS_LEAD_IN_5 : begin
+				//COMPUTE S***********************************
+				// assign muliliers
+				CX1 <= $signed(mult1);
+				CX2 <= $signed(mult2);
+				CX3 <= $signed(mult3);
+				CX4 <= $signed(mult4);
+				
+				// assign col_i
+				// assign col_i
+				if(half_flag == 1'b0)begin
+					C_col_i1 <= 3'd0;
+				end else begin
+					C_col_i1 <= 3'd4;
+				end
+				
+				C_col_i2 <= C_col_i1  + 3'd1;
+				C_col_i3 <= C_col_i1  + 3'd2;
+				C_col_i4 <= C_col_i1  + 3'd3;
+				
+				ROW_INDEX <= ROW_INDEX + 3'd1;
+				
+				// increment accmulartor for previous CT
+				S_ACC_one <= S_ACC_one + Result_one;
+				S_ACC_two <= S_ACC_two + Result_two;
+				S_ACC_three <= S_ACC_three + Result_three;
+				S_ACC_four <= S_ACC_four + Result_four;
+				
+				// Read_DP2
+				DP2_we_n_b <= 1'b0;
+				DP2_addr_b <= DP2_addr_b + 7'd8;
+				S_P <= $signed(DP2_read_data_b);
+				// Write Lefted T from CT
+				DP2_write_data_a <= Twrite_buf[3];
+				DP2_addr_a <= DP2_addr_a + 7'd1;
+				
+				//FETCH_S***************************************** CHECK and PLUS ONE
+				if(fetch_col_i == 3'd7)begin
+					fetch_row_i <= fetch_row_i + 3'd1;
+					fetch_col_i <= 3'd0;
+				end else begin
+					fetch_col_i <= fetch_col_i + 3'd1;
+				end
+				
+				if(fetch_row_i == 3'd7 && fetch_col_i == 3'd7) begin
+					fetch_col_b <= fetch_col_b + 6'd1;
+					fetch_row_i <=3'd0;		
+				end
+				
+				if(fetch_col_b == col_base) begin
+					fetch_row_b <= fetch_row_b + 5'd1;
+					fetch_col_b <= 6'd0;
+				end
+				
+				if(fetch_row_b == 5'd29)begin
+					fetch_col_i <= 3'd0;
+					fetch_row_i <= 3'd0;
+					fetch_col_b <= 6'd0;
+					fetch_row_b <= 5'd0;
+				end
+				// write to SRAM_address
+				// Write into DP ram
+				DP1_we_n_b <= 1'b1;
+				DP1_write_data_b <= $signed(SRAM_read_data); // write to DP ram1
+				DP1_addr_b <= DP1_addr_b + 7'd1;
+				
+				M2_state <= M2_MEGA_CSFS_LEAD_IN_6;
+			end
+			
+			M2_MEGA_CSFS_LEAD_IN_6 : begin
+				// assign muliliers
+				CX1 <= $signed(mult1);
+				CX2 <= $signed(mult2);
+				CX3 <= $signed(mult3);
+				CX4 <= $signed(mult4);
+				
+				// assign col_i
+				// assign col_i
+				if(half_flag == 1'b0)begin
+					C_col_i1 <= 3'd0;
+				end else begin
+					C_col_i1 <= 3'd4;
+				end
+				
+				C_col_i2 <= C_col_i1  + 3'd1;
+				C_col_i3 <= C_col_i1  + 3'd2;
+				C_col_i4 <= C_col_i1  + 3'd3;
+				
+				ROW_INDEX <= ROW_INDEX + 3'd1;
+				
+				// reset half_flag
+				half_flag <= ~half_flag;
+				
+				// increment accmulartor for previous CT
+				S_ACC_one <= S_ACC_one + Result_one;
+				S_ACC_two <= S_ACC_two + Result_two;
+				S_ACC_three <= S_ACC_three + Result_three;
+				S_ACC_four <= S_ACC_four + Result_four;
+				
+				// disable write from PREV_T
+				DP2_we_n_a <= 1'b0;
+				// Read_DP2 T
+				DP2_we_n_b <= 1'b0;
+				DP2_addr_b <= DP2_addr_b + 7'd8;
+				S_P <= $signed(DP2_read_data_b);
+				//FETCH_S*****************************************
+				
+				DP1_we_n_b <= 1'b0;
+				M2_SRAM_address <= M2_READ_address;
+				
+				M2_state <= M2_MEGA_CSFS_LEAD_IN_7;
+			end
+			
+			M2_MEGA_CSFS_LEAD_IN_7 : begin
+				//COMPUTE S***********************************
+				if(half_flag == 1'b1) begin
+					DP2_addr_b <=DP2_addr_b - 7'd56;
+				end else begin
+					DP2_addr_b <= DP2_addr_b  - 7'd55;
+				end
+				S_P <= $signed(DP2_read_data_b);
+				// assign muliliers
+				CX1 <= $signed(mult1);
+				CX2 <= $signed(mult2);
+				CX3 <= $signed(mult3);
+				CX4 <= $signed(mult4);
+				
+				// assign col_i
+				// assign col_i
+
+				C_col_i2 <= C_col_i1  + 3'd1;
+				C_col_i3 <= C_col_i1  + 3'd2;
+				C_col_i4 <= C_col_i1  + 3'd3;
+				
+				ROW_INDEX <= ROW_INDEX + 3'd1;
+				
+				// increment accmulartor for previous CT
+				S_ACC_one <= S_ACC_one + Result_one;
+				S_ACC_two <= S_ACC_two + Result_two;
+				S_ACC_three <= S_ACC_three + Result_three;
+				S_ACC_four <= S_ACC_four + Result_four;
+				
+				
+
+				//FETCH_S***************************************** CHECK and PLUS ONE
+				if(fetch_col_i == 3'd7)begin
+					fetch_row_i <= fetch_row_i + 3'd1;
+					fetch_col_i <= 3'd0;
+				end else begin
+					fetch_col_i <= fetch_col_i + 3'd1;
+				end
+				
+				if(fetch_row_i == 3'd7 && fetch_col_i == 3'd7) begin
+					fetch_col_b <= fetch_col_b + 6'd1;
+					fetch_row_i <=3'd0;		
+				end
+				
+				if(fetch_col_b == col_base) begin
+					fetch_row_b <= fetch_row_b + 5'd1;
+					fetch_col_b <= 6'd0;
+				end
+				
+				if(fetch_row_b == 5'd29)begin
+					fetch_col_i <= 3'd0;
+					fetch_row_i <= 3'd0;
+					fetch_col_b <= 6'd0;
+					fetch_row_b <= 5'd0;
+				end
+				
+				// write to SRAM_address
+				// Write into DP ram
+				DP1_we_n_b <= 1'b1;
+				DP1_write_data_b <= $signed(SRAM_read_data); // write to DP ram1
+				DP1_addr_b <= DP1_addr_b + 7'd1;
+				
+				// update
+				
+				M2_state <= M2_MEGA_CSFS_COMMON_0;
+			end
+			
+			M2_MEGA_CSFS_COMMON_0: begin
+				//COMPUTE S***********************************
+				// read T dta from DP2
+				DP2_addr_b <= DP2_addr_b + 7'd8;
+			   S_P <= $signed(DP2_read_data_b);
+				
+				// assign muliliers
+				CX1 <= $signed(mult1);
+				CX2 <= $signed(mult2);
+				CX3 <= $signed(mult3);
+				CX4 <= $signed(mult4);
+				
+				// assign col_i
+				// assign col_i
+				if(half_flag == 1'b0)begin
+					C_col_i1 <= 3'd0;
+				end else begin
+					C_col_i1 <= 3'd4;
+				end
+				
+				C_col_i2 <= C_col_i1  + 3'd1;
+				C_col_i3 <= C_col_i1  + 3'd2;
+				C_col_i4 <= C_col_i1  + 3'd3;
+				
+				ROW_INDEX <= ROW_INDEX + 3'd1;
+				
+				
+				// increment accmulartor for previous CT
+				S_ACC_one <= S_ACC_one + Result_one;
+				S_ACC_two <= S_ACC_two + Result_two;
+				S_ACC_three <= S_ACC_three + Result_three;
+				S_ACC_four <= S_ACC_four + Result_four;
+				
+				
+				//FETCH_S*****************************************
+				
+				DP1_we_n_b <= 1'b0;
+				M2_SRAM_address <= M2_READ_address;
+				
+				M2_state <= M2_MEGA_CSFS_COMMON_1;
+			end
+			
+			M2_MEGA_CSFS_COMMON_1: begin
+				// assign muliliers
+				CX1 <= $signed(mult1);
+				CX2 <= $signed(mult2);
+				CX3 <= $signed(mult3);
+				CX4 <= $signed(mult4);
+				
+				// assign col_i
+				// assign col_i
+				if(half_flag == 1'b0)begin
+					C_col_i1 <= 3'd0;
+				end else begin
+					C_col_i1 <= 3'd4;
+				end
+				
+				C_col_i2 <= C_col_i1  + 3'd1;
+				C_col_i3 <= C_col_i1  + 3'd2;
+				C_col_i4 <= C_col_i1  + 3'd3;
+				
+				ROW_INDEX <= ROW_INDEX + 3'd1;
+				
+				
+				if(S_row == 3'd7)begin
+					S_col <= S_col + 3'd1;
+					S_row <= 3'd0;
+				end else begin
+					S_row <= S_row + 3'd1;
+				end
+				
+				
+				if(First_Write == 1'b1) begin
+					First_Write <= 1'b0;
+					S_row <= 3'd0;
+					S_col <= 3'd0;
+				end
+				
+				
+				// Read_DP2
+				DP2_we_n_b <= 1'b0;
+				DP2_addr_b <= DP2_addr_b + 7'd8;
+				S_P <= $signed(DP2_read_data_b);
+				
+				// take care of value from prev CS
+				Swrite_buf[0] <= S_ACC_one;
+				Swrite_buf[1] <= S_ACC_two; 
+				Swrite_buf[2] <= S_ACC_three;
+				Swrite_buf[3] <= S_ACC_four;
+				
+				//FETCH_S***************************************** CHECK and PLUS ONE
+				if(fetch_col_i == 3'd7)begin
+					fetch_row_i <= fetch_row_i + 3'd1;
+					fetch_col_i <= 3'd0;
+				end else begin
+					fetch_col_i <= fetch_col_i + 3'd1;
+				end
+				
+				if(fetch_row_i == 3'd7 && fetch_col_i == 3'd7) begin
+					fetch_col_b <= fetch_col_b + 6'd1;
+					fetch_row_i <=3'd0;		
+				end
+				
+				if(fetch_col_b == col_base) begin
+					fetch_row_b <= fetch_row_b + 5'd1;
+					fetch_col_b <= 6'd0;
+				end
+				
+				if(fetch_row_b == 5'd29)begin
+					fetch_col_i <= 3'd0;
+					fetch_row_i <= 3'd0;
+					fetch_col_b <= 6'd0;
+					fetch_row_b <= 5'd0;
+				end
+				
+				// write to SRAM_address
+				// Write into DP ram
+				DP1_we_n_b <= 1'b1;
+				DP1_write_data_b <= $signed(SRAM_read_data); // write to DP ram1
+				DP1_addr_b <= DP1_addr_b + 7'd1;
+				
+				M2_state <= M2_MEGA_CSFS_COMMON_2;
+			end
+			
+			M2_MEGA_CSFS_COMMON_2:begin
+				// assign muliliers
+				CX1 <= $signed(mult1);
+				CX2 <= $signed(mult2);
+				CX3 <= $signed(mult3);
+				CX4 <= $signed(mult4);
+				
+				// assign col_i
+				// assign col_i
+				if(half_flag == 1'b0)begin
+					C_col_i1 <= 3'd0;
+				end else begin
+					C_col_i1 <= 3'd4;
+				end
+				
+				C_col_i2 <= C_col_i1  + 3'd1;
+				C_col_i3 <= C_col_i1  + 3'd2;
+				C_col_i4 <= C_col_i1  + 3'd3;
+				
+				ROW_INDEX <= ROW_INDEX + 3'd1;
+				
+				
+				
+				S_row <= S_row + 3'd1;
+			
+				
+				// increment accmulartor for previous CT
+				S_ACC_one <= Result_one;
+				S_ACC_two <= Result_two;
+				S_ACC_three <= Result_three;
+				S_ACC_four <= Result_four;
+				
+				
+				// Read_DP2 T
+				DP2_we_n_b <= 1'b0;
+				DP2_addr_b <= DP2_addr_b + 7'd8;
+				S_P <= $signed(DP2_read_data_b);
+				// Write S
+				DP3_we_n_b <= 1'b1;
+				
+
+				DP3_addr_b <= {1'b0,{S_row,S_col}};
+				
+				DP3_write_data_b <= Swrite_buf[0];
+				//FETCH_S'*****************************************
+				DP1_we_n_b <= 1'b0;
+				M2_SRAM_address <= M2_READ_address;
+				
+				M2_state <= M2_MEGA_CSFS_COMMON_3;
+			end
+			
+			M2_MEGA_CSFS_COMMON_3 :begin
+				//COMPUTE S***********************************
+				// assign muliliers
+				CX1 <= $signed(mult1);
+				CX2 <= $signed(mult2);
+				CX3 <= $signed(mult3);
+				CX4 <= $signed(mult4);
+				
+				// assign col_i
+				// assign col_i
+				if(half_flag == 1'b0)begin
+					C_col_i1 <= 3'd0;
+				end else begin
+					C_col_i1 <= 3'd4;
+				end
+				
+				C_col_i2 <= C_col_i1  + 3'd1;
+				C_col_i3 <= C_col_i1  + 3'd2;
+				C_col_i4 <= C_col_i1  + 3'd3;
+				
+				ROW_INDEX <= ROW_INDEX + 3'd1;
+				
+				// increment accmulartor for previous CT
+				S_ACC_one <= S_ACC_one + Result_one;
+				S_ACC_two <= S_ACC_two + Result_two;
+				S_ACC_three <= S_ACC_three + Result_three;
+				S_ACC_four <= S_ACC_four + Result_four;
+				
+				// Read_DP2
+				DP2_we_n_b <= 1'b0;
+				DP2_addr_b <= DP2_addr_b + 7'd8;
+				S_P <= $signed(DP2_read_data_b);
+				
+				
+				
+				
+				// Write S
+				DP3_we_n_b <= 1'b1;
+				DP3_write_data_b <= Swrite_buf[1];
+				S_row <= S_row + 3'd1;
+				DP3_addr_b <= {1'b0,{S_row,S_col}};
+
+				
+				//FETCH_S***************************************** CHECK and PLUS ONE
+				if(fetch_col_i == 3'd7)begin
+					fetch_row_i <= fetch_row_i + 3'd1;
+					fetch_col_i <= 3'd0;
+				end else begin
+					fetch_col_i <= fetch_col_i + 3'd1;
+				end
+				
+				if(fetch_row_i == 3'd7 && fetch_col_i == 3'd7) begin
+					fetch_col_b <= fetch_col_b + 6'd1;
+					fetch_row_i <=3'd0;		
+				end
+				
+				if(fetch_col_b == col_base) begin
+					fetch_row_b <= fetch_row_b + 5'd1;
+					fetch_col_b <= 6'd0;
+				end
+				
+				if(fetch_row_b == 5'd29)begin
+					fetch_col_i <= 3'd0;
+					fetch_row_i <= 3'd0;
+					fetch_col_b <= 6'd0;
+					fetch_row_b <= 5'd0;
+				end
+				
+				// write to SRAM_address
+				// Write into DP ram
+				DP1_we_n_b <= 1'b1;
+				DP1_write_data_b <= $signed(SRAM_read_data); // write to DP ram1
+				DP1_addr_b <= DP1_addr_b + 7'd1;
+				
+				M2_state <= M2_MEGA_CSFS_COMMON_4;
+			end
+			M2_MEGA_CSFS_COMMON_4:begin
+				// assign muliliers
+				CX1 <= $signed(mult1);
+				CX2 <= $signed(mult2);
+				CX3 <= $signed(mult3);
+				CX4 <= $signed(mult4);
+				
+				// assign col_i
+				// assign col_i
+				if(half_flag == 1'b0)begin
+					C_col_i1 <= 3'd0;
+				end else begin
+					C_col_i1 <= 3'd4;
+				end
+				
+				C_col_i2 <= C_col_i1  + 3'd1;
+				C_col_i3 <= C_col_i1  + 3'd2;
+				C_col_i4 <= C_col_i1  + 3'd3;
+				
+				ROW_INDEX <= ROW_INDEX + 3'd1;
+				
+				
+				// increment accmulartor for previous CT
+				S_ACC_one <= S_ACC_one + Result_one;
+				S_ACC_two <= S_ACC_two + Result_two;
+				S_ACC_three <= S_ACC_three + Result_three;
+				S_ACC_four <= S_ACC_four + Result_four;
+				
+				
+				S_row <= S_row + 3'd1;
+				
+				DP3_addr_b <= {1'b0,{S_row,S_col}};
+				
+				// Read_DP2 T
+				DP2_we_n_b <= 1'b0;
+				DP2_addr_b <= DP2_addr_b + 7'd8;
+				S_P <= $signed(DP2_read_data_b);
+				// Write S
+				DP3_we_n_b <= 1'b1;
+				DP3_write_data_b <= Swrite_buf[2];
+				
+				//FETCH_S*****************************************
+				DP1_we_n_b <= 1'b0;
+				M2_SRAM_address <= M2_READ_address;
+				
+				
+				M2_state <= M2_MEGA_CSFS_COMMON_5;
+			end
+			
+			M2_MEGA_CSFS_COMMON_5:begin
+				//COMPUTE S***********************************
+				// assign muliliers
+				CX1 <= $signed(mult1);
+				CX2 <= $signed(mult2);
+				CX3 <= $signed(mult3);
+				CX4 <= $signed(mult4);
+				
+				// assign col_i
+				// assign col_i
+				if(half_flag == 1'b0)begin
+					C_col_i1 <= 3'd0;
+				end else begin
+					C_col_i1 <= 3'd4;
+				end
+				
+				C_col_i2 <= C_col_i1  + 3'd1;
+				C_col_i3 <= C_col_i1  + 3'd2;
+				C_col_i4 <= C_col_i1  + 3'd3;
+				
+				ROW_INDEX <= ROW_INDEX + 3'd1;
+				
+				// increment accmulartor for previous CT
+				S_ACC_one <= S_ACC_one + Result_one;
+				S_ACC_two <= S_ACC_two + Result_two;
+				S_ACC_three <= S_ACC_three + Result_three;
+				S_ACC_four <= S_ACC_four + Result_four;
+				
+				// Read_DP2
+				DP2_we_n_b <= 1'b0;
+				DP2_addr_b <= DP2_addr_b + 7'd8;
+				S_P <= $signed(DP2_read_data_b);
+				
+				// Write S
+				DP3_we_n_b <= 1'b1;
+				DP3_addr_b <= {1'b0,{S_row,S_col}};
+				DP3_write_data_b <= Swrite_buf[3];
+				
+				
+				//FETCH_S***************************************** CHECK and PLUS ONE
+				if(fetch_col_i == 3'd7)begin
+					fetch_row_i <= fetch_row_i + 3'd1;
+					fetch_col_i <= 3'd0;
+				end else begin
+					fetch_col_i <= fetch_col_i + 3'd1;
+				end
+				
+				if(fetch_row_i == 3'd7 && fetch_col_i == 3'd7) begin
+					fetch_col_b <= fetch_col_b + 6'd1;
+					fetch_row_i <=3'd0;		
+				end
+				
+				if(fetch_col_b == col_base) begin
+					fetch_row_b <= fetch_row_b + 5'd1;
+					fetch_col_b <= 6'd0;
+				end
+				
+				if(fetch_row_b == 5'd29)begin
+					fetch_col_i <= 3'd0;
+					fetch_row_i <= 3'd0;
+					fetch_col_b <= 6'd0;
+					fetch_row_b <= 5'd0;
+				end
+				
+				// write to SRAM_address
+				// Write into DP ram
+				DP1_we_n_b <= 1'b1;
+				DP1_write_data_b <= $signed(SRAM_read_data); // write to DP ram1
+				DP1_addr_b <= DP1_addr_b + 7'd1;
+				M2_state <= M2_MEGA_CSFS_COMMON_6;
+			end
+			
+			M2_MEGA_CSFS_COMMON_6 : begin
+				// assign muliliers
+				CX1 <= $signed(mult1);
+				CX2 <= $signed(mult2);
+				CX3 <= $signed(mult3);
+				CX4 <= $signed(mult4);
+				if(half_flag == 1'b0)begin
+					C_col_i1 <= 3'd0;
+				end else begin
+					C_col_i1 <= 3'd4;
+				end
+				
+				// reset half_flag
+				half_flag <= ~half_flag;
+
+				
+				// assign col_i
+				// assign col_i
+				
+				
+				C_col_i2 <= C_col_i1  + 3'd1;
+				C_col_i3 <= C_col_i1  + 3'd2;
+				C_col_i4 <= C_col_i1  + 3'd3;
+				
+				ROW_INDEX <= ROW_INDEX + 3'd1;
+				
+				DP3_we_n_b <= 1'b0;
+				// increment accmulartor for previous CT
+				S_ACC_one <= S_ACC_one + Result_one;
+				S_ACC_two <= S_ACC_two + Result_two;
+				S_ACC_three <= S_ACC_three + Result_three;
+				S_ACC_four <= S_ACC_four + Result_four;
+				
+				
+				// Read_DP2 T
+				DP2_we_n_b <= 1'b0;
+				DP2_addr_b <= DP2_addr_b + 7'd8;
+				S_P <= $signed(DP2_read_data_b);
+				//FETCH_S*****************************************
+				DP1_we_n_b <= 1'b0;
+				M2_SRAM_address <= M2_READ_address;
+				
+				M2_state <= M2_MEGA_CSFS_COMMON_7;
+			end
+			
+			M2_MEGA_CSFS_COMMON_7: begin
+				//COMPUTE S***********************************
+				if(half_flag == 1'b1) begin
+					DP2_addr_b <=DP2_addr_b - 7'd56;
+				end else begin
+					DP2_addr_b <= DP2_addr_b  - 7'd55;
+				end
+				// assign muliliers
+				CX1 <= $signed(mult1);
+				CX2 <= $signed(mult2);
+				CX3 <= $signed(mult3);
+				CX4 <= $signed(mult4);
+				
+				// assign col_i
+				// assign col_i
+
+				
+				C_col_i2 <= C_col_i1  + 3'd1;
+				C_col_i3 <= C_col_i1  + 3'd2;
+				C_col_i4 <= C_col_i1  + 3'd3;
+				
+				ROW_INDEX <= ROW_INDEX + 3'd1;
+				
+				// increment accmulartor for previous CT
+				S_ACC_one <= S_ACC_one + Result_one;
+				S_ACC_two <= S_ACC_two + Result_two;
+				S_ACC_three <= S_ACC_three + Result_three;
+				S_ACC_four <= S_ACC_four + Result_four;
+				
+				// Read_DP2
+				DP2_we_n_b <= 1'b0;
+				S_P <= $signed(DP2_read_data_b);
+				
+				
+				//FETCH_S***************************************** CHECK and PLUS ONE
+				if(fetch_col_i == 3'd7)begin
+					fetch_row_i <= fetch_row_i + 3'd1;
+					fetch_col_i <= 3'd0;
+				end else begin
+					fetch_col_i <= fetch_col_i + 3'd1;
+				end
+				
+				if(fetch_row_i == 3'd7 && fetch_col_i == 3'd7) begin
+					fetch_col_b <= fetch_col_b + 6'd1;
+					fetch_row_i <=3'd0;		
+				end
+				
+				if(fetch_col_b == col_base) begin
+					fetch_row_b <= fetch_row_b + 5'd1;
+					fetch_col_b <= 6'd0;
+				end
+				
+				if(fetch_row_b == 5'd29)begin
+					fetch_col_i <= 3'd0;
+					fetch_row_i <= 3'd0;
+					fetch_col_b <= 6'd0;
+					fetch_row_b <= 5'd0;
+				end
+
+				// write to SRAM_address
+				// Write into DP ram
+				DP1_we_n_b <= 1'b1;
+				DP1_write_data_b <= $signed(SRAM_read_data); // write to DP ram1
+				DP1_addr_b <= DP1_addr_b + 7'd1;
+				
+				if(State_counter < 7'd13)begin
+					M2_state <= M2_MEGA_CSFS_COMMON_0;
+					State_counter <= State_counter + 7'd1;
+				end else begin
+					M2_state <= M2_MEGA_CSFS_LEAD_OUT_0;
+					//update state_counter
+					State_counter <= 7'd0;
+				end
+			end
+			
+			M2_MEGA_CSFS_LEAD_OUT_0 : begin
+				//COMPUTE S***********************************
+				// read T dta from DP2
+				DP2_addr_b <= DP2_addr_b  + 7'd8;
+			   S_P <= $signed(DP2_read_data_b);
+				
+				// assign muliliers
+				CX1 <= $signed(mult1);
+				CX2 <= $signed(mult2);
+				CX3 <= $signed(mult3);
+				CX4 <= $signed(mult4);
+				
+				// assign col_i
+				// assign col_i
+				if(half_flag == 1'b0)begin
+					C_col_i1 <= 3'd0;
+				end else begin
+					C_col_i1 <= 3'd4;
+				end
+				
+				C_col_i2 <= C_col_i1  + 3'd1;
+				C_col_i3 <= C_col_i1  + 3'd2;
+				C_col_i4 <= C_col_i1  + 3'd3;
+				
+				ROW_INDEX <= ROW_INDEX + 3'd1;
+				
+				// increment accmulartor for previous CT
+				S_ACC_one <= S_ACC_one + Result_one;
+				S_ACC_two <= S_ACC_two + Result_two;
+				S_ACC_three <= S_ACC_three + Result_three;
+				S_ACC_four <= S_ACC_four + Result_four;
+				
+				
+				//FETCH_S*****************************************
+				DP2_we_n_b <= 1'b0;
+				M2_SRAM_address <= M2_READ_address;
+				
+				M2_state <= M2_MEGA_CSFS_LEAD_OUT_1;
+				
+				if(fetch_row_i == 3'd7 && fetch_col_i == 3'd7) begin
+					fetch_col_b <= fetch_col_b + 6'd1;
+					fetch_row_i <=3'd0;		
+				end
+				
+				if(fetch_col_b == 6'd39) begin
+					fetch_row_b <= fetch_row_b + 5'd1;
+					fetch_col_b <= 6'd0;
+				end
+				
+				if(fetch_row_b == 5'd29)begin
+					fetch_col_i <= 3'd0;
+					fetch_row_i <= 3'd0;
+					fetch_col_b <= 6'd0;
+					fetch_row_b <= 5'd0;
+				end
+
+			end
+			
+			M2_MEGA_CSFS_LEAD_OUT_1: begin
+				// assign muliliers
+				CX1 <= $signed(mult1);
+				CX2 <= $signed(mult2);
+				CX3 <= $signed(mult3);
+				CX4 <= $signed(mult4);
+				
+				// assign col_i
+				// assign col_i
+				if(half_flag == 1'b0)begin
+					C_col_i1 <= 3'd0;
+				end else begin
+					C_col_i1 <= 3'd4;
+				end
+				
+				C_col_i2 <= C_col_i1  + 3'd1;
+				C_col_i3 <= C_col_i1  + 3'd2;
+				C_col_i4 <= C_col_i1  + 3'd3;
+				
+				ROW_INDEX <= ROW_INDEX + 3'd1;
+				
+				// increment accmulartor for previous CT
+				Swrite_buf[0] <= S_ACC_one;
+				Swrite_buf[1] <= S_ACC_two; 
+				Swrite_buf[2] <= S_ACC_three;
+				Swrite_buf[3] <= S_ACC_four;
+				// Read_DP2
+				DP2_we_n_b <= 1'b0;
+				DP2_addr_b <= DP2_addr_b + 7'd8;
+				S_P <= $signed(DP2_read_data_b);
+				
+				
+				S_row <= S_row + 3'd1;
+				
+				
+				
+				//FETCH_S***************************************** CHECK and PLUS ONE
+				if(fetch_col_i == 3'd7)begin
+					fetch_row_i <= fetch_row_i + 3'd1;
+					fetch_col_i <= 3'd0;
+				end else begin
+					fetch_col_i <= fetch_col_i + 3'd1;
+				end
+				
+				if(fetch_row_i == 3'd7) begin
+					fetch_col_b <= fetch_col_b + 6'd1;
+					fetch_row_i <=3'd0;		
+				end
+				
+				if(fetch_col_b == col_base) begin
+					fetch_row_b <= fetch_row_b + 5'd1;
+					fetch_col_b <= 6'd0;
+				end
+				
+				if(fetch_row_b == 5'd29)begin
+					fetch_col_i <= 3'd0;
+					fetch_row_i <= 3'd0;
+					fetch_col_b <= 6'd0;
+					fetch_row_b <= 5'd0;
+				end
+				// write to SRAM_address
+				// Write into DP ram
+				DP1_we_n_b <= 1'b1;
+				DP1_addr_b <= DP1_addr_b + 6'd1;
+				DP1_write_data_b <= $signed(SRAM_read_data); // write to DP ram1
+				S_col <= S_col + 3'd1;
+				M2_state <= M2_MEGA_CSFS_LEAD_OUT_2;
+			end
+			
+			M2_MEGA_CSFS_LEAD_OUT_2: begin
+				// assign muliliers
+				CX1 <= $signed(mult1);
+				CX2 <= $signed(mult2);
+				CX3 <= $signed(mult3);
+				CX4 <= $signed(mult4);
+				
+				// assign col_i
+				// assign col_i
+				if(half_flag == 1'b0)begin
+					C_col_i1 <= 3'd0;
+				end else begin
+					C_col_i1 <= 3'd4;
+				end
+				
+				C_col_i2 <= C_col_i1  + 3'd1;
+				C_col_i3 <= C_col_i1  + 3'd2;
+				C_col_i4 <= C_col_i1  + 3'd3;
+				
+				ROW_INDEX <= ROW_INDEX + 3'd1;
+				
+				// increment accmulartor for previous CT
+				S_ACC_one <= S_ACC_one + Result_one;
+				S_ACC_two <= S_ACC_two + Result_two;
+				S_ACC_three <= S_ACC_three + Result_three;
+				S_ACC_four <= S_ACC_four + Result_four;
+				
+				
+				// Read_DP2 T
+				DP2_we_n_b <= 1'b0;
+				DP2_addr_b <= DP2_addr_b + 7'd8;
+				S_P <= $signed(DP2_read_data_b);
+				// Write S
+				DP3_we_n_b <= 1'b1;
+				
+			
+			
+				S_row <= S_row + 3'd1;
+		
+				
+				DP3_addr_b <= {1'b0,{S_row,S_col}};
+				DP3_write_data_b <= Swrite_buf[0];
+				//FETCH_S'*****************************************
+				DP2_we_n_b <= 1'b0;
+				M2_SRAM_address <= M2_READ_address;
+				
+				M2_state <= M2_MEGA_CSFS_LEAD_OUT_3;
+			end
+			
+			M2_MEGA_CSFS_LEAD_OUT_3 : begin
+				//COMPUTE S***********************************
+				// assign muliliers
+				CX1 <= $signed(mult1);
+				CX2 <= $signed(mult2);
+				CX3 <= $signed(mult3);
+				CX4 <= $signed(mult4);
+				
+				// assign col_i
+			// assign col_i
+				if(half_flag == 1'b0)begin
+					C_col_i1 <= 3'd0;
+				end else begin
+					C_col_i1 <= 3'd4;
+				end
+				
+				C_col_i2 <= C_col_i1  + 3'd1;
+				C_col_i3 <= C_col_i1  + 3'd2;
+				C_col_i4 <= C_col_i1  + 3'd3;
+				
+				ROW_INDEX <= ROW_INDEX + 3'd1;
+				
+				// increment accmulartor for previous CT
+				S_ACC_one <= S_ACC_one + Result_one;
+				S_ACC_two <= S_ACC_two + Result_two;
+				S_ACC_three <= S_ACC_three + Result_three;
+				S_ACC_four <= S_ACC_four + Result_four;
+				
+				// Read_DP2
+				DP2_we_n_b <= 1'b0;
+				DP2_addr_b <= DP2_addr_b + 7'd8;
+				S_P <= $signed(DP2_read_data_b);
+				
+				// Write S
+				DP3_we_n_b <= 1'b1;
+				
+				S_row <= S_row + 3'd1;
+				
+				
+				DP3_addr_b <= {1'b0,{S_row,S_col}};
+				DP3_write_data_b <= Swrite_buf[1];
+				
+				//FETCH_S***************************************** CHECK and PLUS ONE
+				if(fetch_col_i == 3'd7)begin
+					fetch_row_i <= fetch_row_i + 3'd1;
+					fetch_col_i <= 3'd0;
+				end else begin
+					fetch_col_i <= fetch_col_i + 3'd1;
+				end
+				
+				if(fetch_row_i == 3'd7 && fetch_col_i == 3'd7) begin
+					fetch_col_b <= fetch_col_b + 6'd1;
+					fetch_row_i <=3'd0;		
+				end
+				
+				if(fetch_col_b == col_base) begin
+					fetch_row_b <= fetch_row_b + 5'd1;
+					fetch_col_b <= 6'd0;
+				end
+				
+				if(fetch_row_b == 5'd29)begin
+					fetch_col_i <= 3'd0;
+					fetch_row_i <= 3'd0;
+					fetch_col_b <= 6'd0;
+					fetch_row_b <= 5'd0;
+				end
+				
+				// write to SRAM_address
+				// Write into DP ram
+				DP1_we_n_b <= 1'b1;
+				DP1_addr_b <= DP1_addr_b + 7'd1;
+				DP1_write_data_b <= $signed(SRAM_read_data); // write to DP ram1
+				
+				M2_state <= M2_MEGA_CSFS_LEAD_OUT_4;
+			end
+			
+			M2_MEGA_CSFS_LEAD_OUT_4 : begin
+				// assign muliliers
+				CX1 <= $signed(mult1);
+				CX2 <= $signed(mult2);
+				CX3 <= $signed(mult3);
+				CX4 <= $signed(mult4);
+				
+				// assign col_i
+				if(half_flag == 1'b0)begin
+					C_col_i1 <= 3'd0;
+				end else begin
+					C_col_i1 <= 3'd4;
+				end
+				
+				C_col_i2 <= C_col_i1  + 3'd1;
+				C_col_i3 <= C_col_i1  + 3'd2;
+				C_col_i4 <= C_col_i1  + 3'd3;
+				
+				ROW_INDEX <= ROW_INDEX + 3'd1;
+				
+				
+				// increment accmulartor for previous CT
+				S_ACC_one <= S_ACC_one + Result_one;
+				S_ACC_two <= S_ACC_two + Result_two;
+				S_ACC_three <= S_ACC_three + Result_three;
+				S_ACC_four <= S_ACC_four + Result_four;
+				
+				
+				// Read_DP2 T
+				DP2_we_n_b <= 1'b0;
+				DP2_addr_b <= DP2_addr_b + 7'd8;
+				S_P <= $signed(DP2_read_data_b);
+				// Write S
+				DP3_we_n_b <= 1'b1;
+				
+				if(S_row == 3'd7)begin
+					S_row <= 3'd0;
+					S_col <= S_col + 3'd1;
+				end else begin
+					S_row <= S_row + 3'd1;
+				end
+				
+				DP3_addr_b <= {1'b0,{S_row,S_col}};
+				DP3_write_data_b <= Swrite_buf[2];
+				
+				//FETCH_S*****************************************
+				DP2_we_n_b <= 1'b0;
+				M2_SRAM_address <= M2_READ_address;
+				
+				M2_state <= M2_MEGA_CSFS_LEAD_OUT_5;
+			end
+			
+			M2_MEGA_CSFS_LEAD_OUT_5 :begin
+				//COMPUTE S***********************************
+				// assign muliliers
+				CX1 <= $signed(mult1);
+				CX2 <= $signed(mult2);
+				CX3 <= $signed(mult3);
+				CX4 <= $signed(mult4);
+				
+				// assign col_i
+				if(half_flag == 1'b0)begin
+					C_col_i1 <= 3'd0;
+				end else begin
+					C_col_i1 <= 3'd4;
+				end
+				
+				C_col_i2 <= C_col_i1  + 3'd1;
+				C_col_i3 <= C_col_i1  + 3'd2;
+				C_col_i4 <= C_col_i1  + 3'd3;
+				
+				ROW_INDEX <= ROW_INDEX + 3'd1;
+				
+				// increment accmulartor for previous CT
+				S_ACC_one <= S_ACC_one + Result_one;
+				S_ACC_two <= S_ACC_two + Result_two;
+				S_ACC_three <= S_ACC_three + Result_three;
+				S_ACC_four <= S_ACC_four + Result_four;
+				
+				// Read_DP2
+				DP2_we_n_b <= 1'b0;
+				DP2_addr_b <= DP2_addr_b + 7'd8;
+				S_P <= $signed(DP2_read_data_b);
+				
+				// Write S
+				DP3_we_n_b <= 1'b1;
+				DP3_write_data_b <= Swrite_buf[3];
+				DP3_addr_b <= {1'b0,{S_row,S_col}};
+				
+				//FETCH_S***************************************** 
+				
+				// write to SRAM_address
+				// Write into DP ram
+				DP1_we_n_b <= 1'b1;
+				DP1_addr_b <= DP1_addr_b + 7'd1;
+				DP1_write_data_b <= $signed(SRAM_read_data); // write to DP ram1
+				
+				M2_state <= M2_MEGA_CSFS_LEAD_OUT_6;
+			end
+			
+			M2_MEGA_CSFS_LEAD_OUT_6 : begin
+				// assign muliliers
+				CX1 <= $signed(mult1);
+				CX2 <= $signed(mult2);
+				CX3 <= $signed(mult3);
+				CX4 <= $signed(mult4);
+				
+				// assign col_i
+				if(half_flag == 1'b0)begin
+					C_col_i1 <= 3'd0;
+				end else begin
+					C_col_i1 <= 3'd4;
+				end
+				
+				C_col_i2 <= C_col_i1  + 3'd1;
+				C_col_i3 <= C_col_i1  + 3'd2;
+				C_col_i4 <= C_col_i1  + 3'd3;
+				
+				ROW_INDEX <= ROW_INDEX + 3'd1;
+				
+				// reset half_flag
+				half_flag <= ~half_flag;
+				
+				// increment accmulartor for previous CT
+				S_ACC_one <= S_ACC_one + Result_one;
+				S_ACC_two <= S_ACC_two + Result_two;
+				S_ACC_three <= S_ACC_three + Result_three;
+				S_ACC_four <= S_ACC_four + Result_four;
+				
+				
+				// Read_DP2 T
+				DP2_we_n_b <= 1'b0;
+				DP2_addr_b <= DP2_addr_b + 7'd8;
+				S_P <= $signed(DP2_read_data_b);
+				// stop wirte to DP3
+				DP3_we_n_b <= 1'b0;
+				
+				//FETCH_S*****************************************
+				DP2_we_n_b <= 1'b0;
+				M2_state <= M2_MEGA_CSFS_LEAD_OUT_7;
+			end
+			
+			M2_MEGA_CSFS_LEAD_OUT_7: begin
+				//COMPUTE S***********************************
+				// assign muliliers
+				CX1 <= $signed(mult1);
+				CX2 <= $signed(mult2);
+				CX3 <= $signed(mult3);
+				CX4 <= $signed(mult4);
+				
+				// assign col_i
+				if(half_flag == 1'b0)begin
+					C_col_i1 <= 3'd0;
+				end else begin
+					C_col_i1 <= 3'd4;
+				end
+				
+				C_col_i2 <= C_col_i1  + 3'd1;
+				C_col_i3 <= C_col_i1  + 3'd2;
+				C_col_i4 <= C_col_i1  + 3'd3;
+				
+				ROW_INDEX <= ROW_INDEX + 3'd1;
+				
+				// increment accmulartor for previous CT
+				S_ACC_one <= S_ACC_one + Result_one;
+				S_ACC_two <= S_ACC_two + Result_two;
+				S_ACC_three <= S_ACC_three + Result_three;
+				S_ACC_four <= S_ACC_four + Result_four;
+				
+				// Read_DP2
+				DP2_we_n_b <= 1'b0;
+				DP2_addr_b <= DP2_addr_b + 7'd8;
+				S_P <= $signed(DP2_read_data_b);
+				First_Write <= 1'b1;
+				
+				
+				//FETCH_S*****************************************
+				// write to SRAM_address
+				// Write into DP ram
+				DP1_we_n_b <= 1'b1;
+				DP1_addr_b <= DP1_addr_b + 7'd1;
+				DP1_write_data_b <= $signed(SRAM_read_data); // write to DP ram1
+				
+				CT_flag <= 1'b1;
+				CS_flag <= 1'b0;
+				
+				M2_state <= M2_MEGA_CTWS_LEAD_IN_0;
+			end
+			
+			//CTWS begins****************************************************************************************************
+			M2_MEGA_CTWS_LEAD_IN_0: begin
+			
+				DP1_we_n_b <= 1'b0;
+				// read S' data from the DP1
+				DP1_addr_a <=7'd0;
+				
+				// assign col_i
+				if(half_flag == 1'b0)begin
+					C_col_i1 <= 3'd0;
+				end else begin
+					C_col_i1 <= 3'd4;
+				end
+				
+				C_col_i2 <= C_col_i1  + 3'd1;
+				C_col_i3 <= C_col_i1  + 3'd2;
+				C_col_i4 <= C_col_i1  + 3'd3;
+				
+				ROW_INDEX <= ROW_INDEX + 3'd1;
+				
+				//prepare for compute T
+				
+				// UPDATE PREV S ACC
+				S_ACC_one <= S_ACC_one + Result_one;
+				S_ACC_two <= S_ACC_two + Result_two;
+				S_ACC_three <= S_ACC_three + Result_three;
+				S_ACC_four <= S_ACC_four + Result_four;
+				
+				//Prepare half flag for 
+				half_flag <= 1'b0;				
+				
+				
+				// WRITE S*******************************************
+				DP3_addr_a <= DP3_addr_a + 7'd1;
+				DP3_we_n_a <= 1'b0;
+				
+				M2_state <= M2_MEGA_CTWS_LEAD_IN_1;
+			end
+			M2_MEGA_CTWS_LEAD_IN_1: begin
+				// read S' dta from DP1
+				DP1_addr_a <= DP1_addr_a + 7'd1;
+				
+			   S_P <= $signed(DP1_read_data_a);
+				
+				// assign muliliers
+				CX1 <= $signed(mult1);
+				CX2 <= $signed(mult2);
+				CX3 <= $signed(mult3);
+				CX4 <= $signed(mult4);
+			
+				// assign col_i
+//				if(half_flag == 1'b0)begin
+//					C_col_i1 <= 3'd0;
+//				end else begin
+//					C_col_i1 <= 3'd4;
+//				end
+				
+				C_col_i2 <= C_col_i1  + 3'd1;
+				C_col_i3 <= C_col_i1  + 3'd2;
+				C_col_i4 <= C_col_i1  + 3'd3;
+				
+				ROW_INDEX <= ROW_INDEX + 3'd1;
+				
+				S_row <= S_row + 3'd1;
+				
+				
+				// store the prev S
+				Swrite_buf[0] <= S_ACC_one;
+				Swrite_buf[1] <= S_ACC_two; 
+				Swrite_buf[2] <= S_ACC_three;
+				Swrite_buf[3] <= S_ACC_four;
+				
+				
+				// increment accmulartor
+				T_ACC_one <=  Result_one;
+				T_ACC_two <=  Result_two;
+				T_ACC_three <=  Result_three;
+				T_ACC_four <=  Result_four;
+				
+				// WRITE S*******************************************
+				DP3_addr_a <= DP3_addr_a + 7'd1;
+				S1_buf <= DP3_read_data_a;
+				
+
+				
+				M2_state <= M2_MEGA_CTWS_LEAD_IN_2;
+			end
+			M2_MEGA_CTWS_LEAD_IN_2: begin
+				
+				// Write PREV S
+				DP3_we_n_b <= 1'b1;
+				S_row <= S_row + 3'd1;
+				
+				DP3_addr_b <= {1'b0,{S_row,S_col}};
+				DP3_write_data_b <= Swrite_buf[0];
+				
+				// read S' dta from DP1
+				DP1_addr_a <= DP1_addr_a + 7'd1;
+				
+			    S_P <= $signed(DP1_read_data_a);
+				
+				// assign muliliers
+				CX1 <= $signed(mult1);
+				CX2 <= $signed(mult2);
+				CX3 <= $signed(mult3);
+				CX4 <= $signed(mult4);
+				
+				// assign col_i
+				if(half_flag == 1'b0)begin
+					C_col_i1 <= 3'd0;
+				end else begin
+					C_col_i1 <= 3'd4;
+				end
+				
+				C_col_i2 <= C_col_i1  + 3'd1;
+				C_col_i3 <= C_col_i1  + 3'd2;
+				C_col_i4 <= C_col_i1  + 3'd3;
+				
+				ROW_INDEX <= ROW_INDEX + 3'd1;
+				
+				
+				// increment accmulartor
+				T_ACC_one <= T_ACC_one + Result_one;
+				T_ACC_two <= T_ACC_two + Result_two;
+				T_ACC_three <= T_ACC_three + Result_three;
+				T_ACC_four <= T_ACC_four + Result_four;
+				
+				// WRITE S*******************************************
+				S2_buf <= DP3_read_data_a;
+				
+				
+				
+				M2_state <= M2_MEGA_CTWS_LEAD_IN_3;
+			end
+			M2_MEGA_CTWS_LEAD_IN_3: begin
+				// // Write PREV S
+				DP3_we_n_b <= 1'b1;
+				S_row <= S_row + 3'd1;
+				
+				
+				DP3_addr_b <= {1'b0,{S_row,S_col}};
+				DP3_write_data_b <= Swrite_buf[1];
+				
+
+				// read S' dta from DP1
+				DP1_addr_a <= DP1_addr_a + 7'd1;
+				
+			   S_P <= $signed(DP1_read_data_a);
+				
+				// assign muliliers
+				CX1 <= $signed(mult1);
+				CX2 <= $signed(mult2);
+				CX3 <= $signed(mult3);
+				CX4 <= $signed(mult4);
+			
+				// assign col_i
+				if(half_flag == 1'b0)begin
+					C_col_i1 <= 3'd0;
+				end else begin
+					C_col_i1 <= 3'd4;
+				end
+				C_col_i2 <= C_col_i1  + 3'd1;
+				C_col_i3 <= C_col_i1  + 3'd2;
+				C_col_i4 <= C_col_i1  + 3'd3;
+				
+				ROW_INDEX <= ROW_INDEX + 3'd1;
+				
+				// increment accmulartor
+				T_ACC_one <= T_ACC_one + Result_one;
+				T_ACC_two <= T_ACC_two + Result_two;
+				T_ACC_three <= T_ACC_three + Result_three;
+				T_ACC_four <= T_ACC_four + Result_four;
+				
+				// WRITE S*******************************************
+				M2_SRAM_we_n <= 1'b0;
+				M2_SRAM_address <= M2_write_address;
+				M2_write_address <= M2_write_address + 18'd1;
+				M2_SRAM_write_data <= {Result_S1,Result_S2};
+				
+				M2_state <= M2_MEGA_CTWS_LEAD_IN_4;
+			end
+			M2_MEGA_CTWS_LEAD_IN_4: begin
+				// // Write PREV S
+				DP3_we_n_b <= 1'b1;
+				
+				if(S_row == 3'd7)begin
+					S_row <= 3'd0;
+					S_col <= S_col + 3'd1;
+				end else begin
+					S_row <= S_row + 3'd1;
+				end
+				
+				DP3_addr_b <= {1'b0,{S_row,S_col}};
+				DP3_write_data_b <= Swrite_buf[2];
+				
+				// read S' dta from DP1
+				DP1_addr_a <= DP1_addr_a + 7'd1;
+				
+			   S_P <= $signed(DP1_read_data_a);
+				
+				// assign muliliers
+				CX1 <= $signed(mult1);
+				CX2 <= $signed(mult2);
+				CX3 <= $signed(mult3);
+				CX4 <= $signed(mult4);
+			
+				// assign col_i
+				if(half_flag == 1'b0)begin
+					C_col_i1 <= 3'd0;
+				end else begin
+					C_col_i1 <= 3'd4;
+				end
+				
+				C_col_i2 <= C_col_i1  + 3'd1;
+				C_col_i3 <= C_col_i1  + 3'd2;
+				C_col_i4 <= C_col_i1  + 3'd3;
+				
+				ROW_INDEX <= ROW_INDEX + 3'd1;
+				
+			
+				
+				// increment accmulartor
+				T_ACC_one <= T_ACC_one + Result_one;
+				T_ACC_two <= T_ACC_two + Result_two;
+				T_ACC_three <= T_ACC_three + Result_three;
+				T_ACC_four <= T_ACC_four + Result_four;
+				
+				// WRITE S*******************************************
+				DP3_addr_a <= DP3_addr_a + 7'd1;
+				// stop write
+				M2_SRAM_we_n <= 1'b1;
+				
+				M2_state <= M2_MEGA_CTWS_LEAD_IN_5;
+			end
+			M2_MEGA_CTWS_LEAD_IN_5: begin
+			
+				// // Write PREV S
+				DP3_we_n_b <= 1'b1;
+				S_row <= S_row + 3'd1;
+				DP3_addr_b <= {1'b0,{S_row,S_col}};
+				DP3_write_data_b <= Swrite_buf[3];
+				
+				
+				// read S' dta from DP1
+				DP1_addr_a <= DP1_addr_a + 7'd1;
+				
+			   S_P <= $signed(DP1_read_data_a);
+				
+				// assign muliliers
+				CX1 <= $signed(mult1);
+				CX2 <= $signed(mult2);
+				CX3 <= $signed(mult3);
+				CX4 <= $signed(mult4);
+			
+				// assign col_i
+				if(half_flag == 1'b0)begin
+					C_col_i1 <= 3'd0;
+				end else begin
+					C_col_i1 <= 3'd4;
+				end
+				
+				C_col_i2 <= C_col_i1  + 3'd1;
+				C_col_i3 <= C_col_i1  + 3'd2;
+				C_col_i4 <= C_col_i1  + 3'd3;
+				
+				ROW_INDEX <= ROW_INDEX + 3'd1;
+				
+				// increment accmulartor
+				T_ACC_one <= T_ACC_one + Result_one;
+				T_ACC_two <= T_ACC_two + Result_two;
+				T_ACC_three <= T_ACC_three + Result_three;
+				T_ACC_four <= T_ACC_four + Result_four;
+	
+				// WRITE S*******************************************
+				DP3_addr_a <= DP3_addr_a + 7'd1;
+				S1_buf <= DP3_read_data_a;
+				
+				M2_state <= M2_MEGA_CTWS_LEAD_IN_6;
+			end
+			M2_MEGA_CTWS_LEAD_IN_6: begin
+				//STOP WRITING S TO DP3
+				DP3_we_n_b <= 1'b0;
+
+				// read S' dta from DP1
+				DP1_addr_a <= DP1_addr_a  + 7'd1;
+				
+			   S_P <= $signed(DP1_read_data_a);
+				
+				// assign muliliers
+				CX1 <= $signed(mult1);
+				CX2 <= $signed(mult2);
+				CX3 <= $signed(mult3);
+				CX4 <= $signed(mult4);
+			
+				// assign col_i
+				if(half_flag == 1'b0)begin
+					C_col_i1 <= 3'd0;
+				end else begin
+					C_col_i1 <= 3'd4;
+				end
+				
+				C_col_i2 <= C_col_i1  + 3'd1;
+				C_col_i3 <= C_col_i1  + 3'd2;
+				C_col_i4 <= C_col_i1  + 3'd3;
+				
+				// stop wirte to DP3
+				DP3_we_n_b <= 1'b0;
+				
+				ROW_INDEX <= ROW_INDEX + 3'd1;
+				
+				// increment accmulartor
+				T_ACC_one <= T_ACC_one + Result_one;
+				T_ACC_two <= T_ACC_two + Result_two;
+				T_ACC_three <= T_ACC_three + Result_three;
+				T_ACC_four <= T_ACC_four + Result_four;
+				
+				// WRITE S*******************************************
+				S2_buf <= DP3_read_data_a;
+				
+				M2_state <= M2_MEGA_CTWS_LEAD_IN_7;
+			end
+			M2_MEGA_CTWS_LEAD_IN_7: begin
+
+				// read S' dta from DP1
+				DP1_addr_a <= DP1_addr_a + 7'd1;
+				
+			   S_P <= $signed(DP1_read_data_a);
+				
+				// assign muliliers
+				CX1 <= $signed(mult1);
+				CX2 <= $signed(mult2);
+				CX3 <= $signed(mult3);
+				CX4 <= $signed(mult4);
+			
+				// assign col_i
+				if(half_flag == 1'b0)begin
+					C_col_i1 <= 3'd0;
+				end else begin
+					C_col_i1 <= 3'd4;
+				end
+				
+				C_col_i2 <= C_col_i1  + 3'd1;
+				C_col_i3 <= C_col_i1  + 3'd2;
+				C_col_i4 <= C_col_i1  + 3'd3;
+				
+				ROW_INDEX <= ROW_INDEX + 3'd1;
+				
+				
+				// increment accmulartor
+				T_ACC_one <= T_ACC_one + Result_one;
+				T_ACC_two <= T_ACC_two + Result_two;
+				T_ACC_three <= T_ACC_three + Result_three;
+				T_ACC_four <= T_ACC_four + Result_four;
+				
+				
+				// update half_flag
+				half_flag <= ~half_flag;
+				
+				State_counter <= 7'd0;
+				
+				// WRITE S*******************************************
+				M2_SRAM_we_n <= 1'b0;
+				M2_SRAM_address <= M2_write_address;
+				M2_write_address <= M2_write_address + 18'd1;
+				M2_SRAM_write_data <= {Result_S1,Result_S2};
+
+				
+				M2_state <= M2_MEGA_CTWS_COMMON_0;
+			end
+			
+			M2_MEGA_CTWS_COMMON_0 : begin
+				// read S' dta from DP1
+				if(half_flag == 1'b1) begin
+					DP1_addr_a <=DP1_addr_a - 7'd7;
+				end else begin
+					DP1_addr_a <= DP1_addr_a  + 7'd1;
+				end
+			   S_P <= $signed(DP1_read_data_a);
+				
+				// assign muliliers
+				CX1 <= $signed(mult1);
+				CX2 <= $signed(mult2);
+				CX3 <= $signed(mult3);
+				CX4 <= $signed(mult4);
+				
+				// assign col_i
+				if(half_flag == 1'b0)begin
+					C_col_i1 <= 3'd0;
+				end else begin
+					C_col_i1 <= 3'd4;
+				end
+				
+				C_col_i2 <= C_col_i1  + 3'd1;
+				C_col_i3 <= C_col_i1  + 3'd2;
+				C_col_i4 <= C_col_i1  + 3'd3;
+				
+				ROW_INDEX <= 3'd0;
+				
+				
+				// increment accmulartor
+				T_ACC_one <= T_ACC_one + Result_one;
+				T_ACC_two <= T_ACC_two + Result_two;
+				T_ACC_three <= T_ACC_three + Result_three;
+				T_ACC_four <= T_ACC_four + Result_four;
+				
+				// WRITE S*******************************************
+				DP3_addr_a <= DP3_addr_a + 7'd1;
+				M2_SRAM_we_n <= 1'b1;
+				M2_state <= M2_MEGA_CTWS_COMMON_1;
+				
+			end
+			
+			M2_MEGA_CTWS_COMMON_1:begin
+				// read S' dta from DP1
+				DP1_addr_a <= DP1_addr_a+ 7'd1;
+				
+			   S_P <= $signed(DP1_read_data_a);
+				
+				// assign muliliers
+				CX1 <= $signed(mult1);
+				CX2 <= $signed(mult2);
+				CX3 <= $signed(mult3);
+				CX4 <= $signed(mult4);
+			
+				// assign col_i
+				if(half_flag == 1'b0)begin
+					C_col_i1 <= 3'd0;
+				end else begin
+					C_col_i1 <= 3'd4;
+				end
+				
+				C_col_i2 <= C_col_i1  + 3'd1;
+				C_col_i3 <= C_col_i1  + 3'd2;
+				C_col_i4 <= C_col_i1  + 3'd3;
+				
+				ROW_INDEX <= ROW_INDEX + 3'd1;
+				
+				// increment accmulartor
+				T_ACC_one <= Result_one;
+				T_ACC_two <= Result_two;
+				T_ACC_three <= Result_three;
+				T_ACC_four <= Result_four;
+				
+				Twrite_buf[0] <= Result_T_one;
+				Twrite_buf[1] <= Result_T_two;
+				Twrite_buf[2] <= Result_T_three;
+				Twrite_buf[3] <= Result_T_four;
+				
+				// WRITE S*******************************************
+				DP3_addr_a <= DP3_addr_a + 7'd1;
+				S1_buf <= DP3_read_data_a;
+				
+				
+				M2_state <= M2_MEGA_CTWS_COMMON_2;
+			end
+			
+			M2_MEGA_CTWS_COMMON_2 : begin
+				// read S' dta from DP1
+				DP1_addr_a <= DP1_addr_a + 7'd1;
+				
+			   S_P <= $signed(DP1_read_data_a);
+				
+				// assign muliliers
+				CX1 <= $signed(mult1);
+				CX2 <= $signed(mult2);
+				CX3 <= $signed(mult3);
+				CX4 <= $signed(mult4);
+			
+				// assign col_i
+				if(half_flag == 1'b0)begin
+					C_col_i1 <= 3'd0;
+				end else begin
+					C_col_i1 <= 3'd4;
+				end
+				
+				C_col_i2 <= C_col_i1  + 3'd1;
+				C_col_i3 <= C_col_i1  + 3'd2;
+				C_col_i4 <= C_col_i1  + 3'd3;
+				
+				ROW_INDEX <= ROW_INDEX + 3'd1;
+				
+				
+				// increment accmulartor
+				T_ACC_one <= T_ACC_one + Result_one;
+				T_ACC_two <= T_ACC_two + Result_two;
+				T_ACC_three <= T_ACC_three + Result_three;
+				T_ACC_four <= T_ACC_four + Result_four;
+				
+				// write T into DP_2;
+				
+				if(First_Write == 1'b1)begin
+					DP2_addr_a <= 7'd0;
+					First_Write <= 1'b0;
+				end else begin
+					DP2_addr_a <= DP2_addr_a + 7'd1;
+				end
+				
+				DP2_we_n_a <= 1'd1;
+				
+				DP2_write_data_a <= Twrite_buf[0];
+				
+				// WRITE S*******************************************
+				S2_buf <= DP3_read_data_a;
+				
+				M2_state <= M2_MEGA_CTWS_COMMON_3;
+				
+			end
+			
+			M2_MEGA_CTWS_COMMON_3 : begin
+				// read S' dta from DP1
+				// read S' dta from DP1
+				DP1_addr_a <= DP1_addr_a + 7'd1;
+				
+			   S_P <= $signed(DP1_read_data_a);
+				
+				// assign muliliers
+				CX1 <= $signed(mult1);
+				CX2 <= $signed(mult2);
+				CX3 <= $signed(mult3);
+				CX4 <= $signed(mult4);
+			
+				// assign col_i
+				if(half_flag == 1'b0)begin
+					C_col_i1 <= 3'd0;
+				end else begin
+					C_col_i1 <= 3'd4;
+				end
+				
+				C_col_i2 <= C_col_i1  + 3'd1;
+				C_col_i3 <= C_col_i1  + 3'd2;
+				C_col_i4 <= C_col_i1  + 3'd3;
+				
+				ROW_INDEX <= ROW_INDEX + 3'd1;
+				
+				
+				// increment accmulartor
+				T_ACC_one <= T_ACC_one + Result_one;
+				T_ACC_two <= T_ACC_two + Result_two;
+				T_ACC_three <= T_ACC_three + Result_three;
+				T_ACC_four <= T_ACC_four + Result_four;
+				
+				// write T into DP_2;
+				DP2_addr_a <= DP2_addr_a + 7'd1;
+				DP2_we_n_a <= 1'd1;
+				DP2_write_data_a <= Twrite_buf[1];
+				
+				// WRITE S*******************************************
+				M2_SRAM_we_n <= 1'b0;
+				M2_SRAM_address <= M2_write_address;
+				M2_write_address <= M2_write_address + 18'd1;
+				M2_SRAM_write_data <= {Result_S1,Result_S2};
+				
+				M2_state <= M2_MEGA_CTWS_COMMON_4;
+				
+			end
+			
+			M2_MEGA_CTWS_COMMON_4 : begin
+				// read S' dta from DP1
+				DP1_addr_a <= DP1_addr_a + 7'd1;
+				
+			   S_P <= $signed(DP1_read_data_a);
+				
+				// assign muliliers
+				CX1 <= $signed(mult1);
+				CX2 <= $signed(mult2);
+				CX3 <= $signed(mult3);
+				CX4 <= $signed(mult4);
+			
+				// assign col_i
+				if(half_flag == 1'b0)begin
+					C_col_i1 <= 3'd0;
+				end else begin
+					C_col_i1 <= 3'd4;
+				end
+				
+				C_col_i2 <= C_col_i1  + 3'd1;
+				C_col_i3 <= C_col_i1  + 3'd2;
+				C_col_i4 <= C_col_i1  + 3'd3;
+				
+				ROW_INDEX <= ROW_INDEX + 3'd1;
+				
+				
+				// increment accmulartor
+				T_ACC_one <= T_ACC_one + Result_one;
+				T_ACC_two <= T_ACC_two + Result_two;
+				T_ACC_three <= T_ACC_three + Result_three;
+				T_ACC_four <= T_ACC_four + Result_four;
+				
+				// write T into DP_2;
+				DP2_addr_a <= DP2_addr_a + 7'd1;
+				DP2_we_n_a <= 1'd1;
+				DP2_write_data_a <= Twrite_buf[2];
+				
+				// WRITE S*******************************************
+				DP3_addr_a <= DP3_addr_a + 7'd1;
+				M2_SRAM_we_n <= 1'b1;
+				M2_state <= M2_MEGA_CTWS_COMMON_5;
+				
+			end
+			
+			M2_MEGA_CTWS_COMMON_5 : begin
+
+				// read S' dta from DP1
+				// read S' dta from DP1
+				DP1_addr_a <= DP1_addr_a + 7'd1;
+				
+			   S_P <= $signed(DP1_read_data_a);
+				
+				// assign muliliers
+				CX1 <= $signed(mult1);
+				CX2 <= $signed(mult2);
+				CX3 <= $signed(mult3);
+				CX4 <= $signed(mult4);
+			
+				// assign col_i
+				if(half_flag == 1'b0)begin
+					C_col_i1 <= 3'd0;
+				end else begin
+					C_col_i1 <= 3'd4;
+				end
+				
+				C_col_i2 <= C_col_i1  + 3'd1;
+				C_col_i3 <= C_col_i1  + 3'd2;
+				C_col_i4 <= C_col_i1  + 3'd3;
+				
+				ROW_INDEX <= ROW_INDEX + 3'd1;
+				
+				
+				// increment accmulartor
+				T_ACC_one <= T_ACC_one + Result_one;
+				T_ACC_two <= T_ACC_two + Result_two;
+				T_ACC_three <= T_ACC_three + Result_three;
+				T_ACC_four <= T_ACC_four + Result_four;
+				
+				// turn off DP2
+				DP2_addr_a <= DP2_addr_a + 7'd1;
+				DP2_we_n_a <= 1'd1;
+				
+				// WRITE S*******************************************
+				DP3_addr_a <= DP3_addr_a + 7'd1;
+				S1_buf <= DP3_read_data_a;
+				
+				M2_state <= M2_MEGA_CTWS_COMMON_6;
+				
+			end
+			
+			M2_MEGA_CTWS_COMMON_6 : begin
+
+				// read S' dta from DP1
+				DP1_addr_a <= DP1_addr_a + 7'd1;
+				
+			   S_P <= $signed(DP1_read_data_a);
+				
+				// assign muliliers
+				CX1 <= $signed(mult1);
+				CX2 <= $signed(mult2);
+				CX3 <= $signed(mult3);
+				CX4 <= $signed(mult4);
+			
+				// assign col_i
+				if(half_flag == 1'b0)begin
+					C_col_i1 <= 3'd0;
+				end else begin
+					C_col_i1 <= 3'd4;
+				end
+				
+				C_col_i2 <= C_col_i1  + 3'd1;
+				C_col_i3 <= C_col_i1  + 3'd2;
+				C_col_i4 <= C_col_i1  + 3'd3;
+				
+				ROW_INDEX <= ROW_INDEX + 3'd1;
+				
+				
+				// increment accmulartor
+				T_ACC_one <= T_ACC_one + Result_one;
+				T_ACC_two <= T_ACC_two + Result_two;
+				T_ACC_three <= T_ACC_three + Result_three;
+				T_ACC_four <= T_ACC_four + Result_four;
+				
+				// read
+				DP2_we_n_a <= 1'd0;
+				
+				// WRITE S*******************************************
+				S2_buf <= DP3_read_data_a;
+				
+				M2_state <= M2_MEGA_CTWS_COMMON_7;
+				
+			end
+			
+			M2_MEGA_CTWS_COMMON_7 : begin
+
+				// read S' dta from DP1
+				// read S' dta from DP1
+				DP1_addr_a <= DP1_addr_a + 7'd1;
+				
+			   S_P <= $signed(DP1_read_data_a);
+				
+				// assign muliliers
+				CX1 <= $signed(mult1);
+				CX2 <= $signed(mult2);
+				CX3 <= $signed(mult3);
+				CX4 <= $signed(mult4);
+				
+				// assign col_i
+				if(half_flag == 1'b0)begin
+					C_col_i1 <= 3'd0;
+				end else begin
+					C_col_i1 <= 3'd4;
+				end
+				
+				C_col_i2 <= C_col_i1  + 3'd1;
+				C_col_i3 <= C_col_i1  + 3'd2;
+				C_col_i4 <= C_col_i1  + 3'd3;
+				
+				ROW_INDEX <= ROW_INDEX + 3'd1;
+
+				// increment accmulartor
+				T_ACC_one <= T_ACC_one + Result_one;
+				T_ACC_two <= T_ACC_two + Result_two;
+				T_ACC_three <= T_ACC_three + Result_three;
+				T_ACC_four <= T_ACC_four + Result_four;
+				
+				half_flag <= ~half_flag;
+				
+				
+				
+				// WRITE S*******************************************
+				M2_SRAM_we_n <= 1'b0;
+				M2_SRAM_address <= M2_write_address;
+				M2_write_address <= M2_write_address + 18'd1;
+				M2_SRAM_write_data <= {Result_S1,Result_S2};
+				
+				if(State_counter < 7'd13)begin
+					M2_state <= M2_MEGA_CTWS_COMMON_0;
+					//update state_counter
+					State_counter <= State_counter + 7'd1; 
+				end else begin
+					M2_state <= M2_MEGA_CTWS_LEAD_OUT_0;
+					State_counter <= 7'd0;
+				end
+			end	
+			M2_MEGA_CTWS_LEAD_OUT_0 :begin
+				// read S' dta from DP1
+				if(half_flag == 1) begin
+					DP1_addr_a <=DP1_addr_a - 7'd7;
+				end else begin
+					DP1_addr_a <= DP1_addr_a  + 7'd1;
+				end
+				
+			   S_P <= $signed(DP1_read_data_a);
+				
+				// assign muliliers
+				CX1 <= $signed(mult1);
+				CX2 <= $signed(mult2);
+				CX3 <= $signed(mult3);
+				CX4 <= $signed(mult4);
+			
+				// assign col_i
+				if(half_flag == 1'b0)begin
+					C_col_i1 <= 3'd0;
+				end else begin
+					C_col_i1 <= 3'd4;
+				end
+				
+				C_col_i2 <= C_col_i1  + 3'd1;
+				C_col_i3 <= C_col_i1  + 3'd2;
+				C_col_i4 <= C_col_i1  + 3'd3;
+				
+				ROW_INDEX <= 3'd0;
+				
+				// increment accmulartor
+				T_ACC_one <= T_ACC_one + Result_one;
+				T_ACC_two <= T_ACC_two + Result_two;
+				T_ACC_three <= T_ACC_three + Result_three;
+				T_ACC_four <= T_ACC_four + Result_four;
+				
+				// WRITE S*******************************************
+				DP3_addr_a <= DP3_addr_a + 7'd1;
+				M2_SRAM_we_n <= 1'b1;
+				M2_state <= M2_MEGA_CTWS_LEAD_OUT_1;
+			end
+			
+			M2_MEGA_CTWS_LEAD_OUT_1 :begin
+				// read S' dta from DP1
+				DP1_addr_a <= DP1_addr_a + 7'd1;
+				
+			   S_P <= $signed(DP1_read_data_a);
+				
+				// assign muliliers
+				CX1 <= $signed(mult1);
+				CX2 <= $signed(mult2);
+				CX3 <= $signed(mult3);
+				CX4 <= $signed(mult4);
+			
+				// assign col_i
+				if(half_flag == 1'b0)begin
+					C_col_i1 <= 3'd0;
+				end else begin
+					C_col_i1 <= 3'd4;
+				end
+				
+				C_col_i2 <= C_col_i1  + 3'd1;
+				C_col_i3 <= C_col_i1  + 3'd2;
+				C_col_i4 <= C_col_i1  + 3'd3;
+				
+				ROW_INDEX <= ROW_INDEX + 3'd1;
+				
+				// increment accmulartor
+				T_ACC_one <=  Result_one;
+				T_ACC_two <=  Result_two;
+				T_ACC_three <=  Result_three;
+				T_ACC_four <=  Result_four;
+				
+				Twrite_buf[0] <= Result_T_one;
+				Twrite_buf[1] <= Result_T_two;
+				Twrite_buf[2] <= Result_T_three;
+				Twrite_buf[3] <= Result_T_four;
+				
+				// WRITE S*******************************************
+				DP3_addr_a <= DP3_addr_a + 7'd1;
+				S1_buf <= DP3_read_data_a;
+				
+				M2_state <= M2_MEGA_CTWS_LEAD_OUT_2;
+			end
+			
+			M2_MEGA_CTWS_LEAD_OUT_2 :begin
+				// read S' dta from DP1
+				DP1_addr_a <= DP1_addr_a + 7'd1;
+				
+			   S_P <= $signed(DP1_read_data_a);
+				
+				// assign muliliers
+				CX1 <= $signed(mult1);
+				CX2 <= $signed(mult2);
+				CX3 <= $signed(mult3);
+				CX4 <= $signed(mult4);
+				
+				// assign col_i
+				if(half_flag == 1'b0)begin
+					C_col_i1 <= 3'd0;
+				end else begin
+					C_col_i1 <= 3'd4;
+				end
+				
+				C_col_i2 <= C_col_i1  + 3'd1;
+				C_col_i3 <= C_col_i1  + 3'd2;
+				C_col_i4 <= C_col_i1  + 3'd3;
+				
+				ROW_INDEX <= ROW_INDEX + 3'd1;
+				
+				// increment accmulartor
+				T_ACC_one <= T_ACC_one + Result_one;
+				T_ACC_two <= T_ACC_two + Result_two;
+				T_ACC_three <= T_ACC_three + Result_three;
+				T_ACC_four <= T_ACC_four + Result_four;
+				
+				// write T[0]
+				DP2_addr_a <= DP2_addr_a + 7'd1;
+				DP2_we_n_a <= 1'd1;
+				
+				DP2_write_data_a <= Twrite_buf[0];
+				
+				// WRITE S*******************************************
+				S2_buf <= DP3_read_data_a;
+				
+				M2_state <= M2_MEGA_CTWS_LEAD_OUT_3;
+				
+			end
+			
+				M2_MEGA_CTWS_LEAD_OUT_3 :begin
+				// read S' dta from DP1
+				DP1_addr_a <= DP1_addr_a + 7'd1;
+				
+			   S_P <= $signed(DP1_read_data_a);
+				
+				// assign muliliers
+				CX1 <= $signed(mult1);
+				CX2 <= $signed(mult2);
+				CX3 <= $signed(mult3);
+				CX4 <= $signed(mult4);
+			
+				// assign col_i
+				if(half_flag == 1'b0)begin
+					C_col_i1 <= 3'd0;
+				end else begin
+					C_col_i1 <= 3'd4;
+				end
+				
+				C_col_i2 <= C_col_i1  + 3'd1;
+				C_col_i3 <= C_col_i1  + 3'd2;
+				C_col_i4 <= C_col_i1  + 3'd3;
+				
+				ROW_INDEX <= ROW_INDEX + 3'd1;
+				
+				// increment accmulartor
+				T_ACC_one <= T_ACC_one + Result_one;
+				T_ACC_two <= T_ACC_two + Result_two;
+				T_ACC_three <= T_ACC_three + Result_three;
+				T_ACC_four <= T_ACC_four + Result_four;
+				
+				// write T[0]
+				DP2_addr_a <= DP2_addr_a + 7'd1;
+				DP2_we_n_a <= 1'd1;
+				
+				DP2_write_data_a <= Twrite_buf[1];
+				
+				// WRITE S*******************************************
+				M2_SRAM_we_n <= 1'b0;
+				M2_SRAM_address <= M2_write_address;
+				M2_write_address <= M2_write_address + 18'd1;
+				M2_SRAM_write_data <= {Result_S1,Result_S2};
+				
+				M2_state <= M2_MEGA_CTWS_LEAD_OUT_4;
+				
+			end
+			
+			M2_MEGA_CTWS_LEAD_OUT_4 :begin
+				// read S' dta from DP1
+				DP1_addr_a <= DP1_addr_a + 7'd1;
+				
+			   S_P <= $signed(DP1_read_data_a);
+				
+				// assign muliliers
+				CX1 <= $signed(mult1);
+				CX2 <= $signed(mult2);
+				CX3 <= $signed(mult3);
+				CX4 <= $signed(mult4);
+			
+				// assign col_i
+				if(half_flag == 1'b0)begin
+					C_col_i1 <= 3'd0;
+				end else begin
+					C_col_i1 <= 3'd4;
+				end
+				
+				C_col_i2 <= C_col_i1  + 3'd1;
+				C_col_i3 <= C_col_i1  + 3'd2;
+				C_col_i4 <= C_col_i1  + 3'd3;
+				
+				ROW_INDEX <= ROW_INDEX + 3'd1;
+				
+				// increment accmulartor
+				T_ACC_one <= T_ACC_one + Result_one;
+				T_ACC_two <= T_ACC_two + Result_two;
+				T_ACC_three <= T_ACC_three + Result_three;
+				T_ACC_four <= T_ACC_four + Result_four;
+				
+				// write T[0]
+				DP2_addr_a <= DP2_addr_a + 7'd1;
+				DP2_we_n_a <= 1'd1;
+				
+				DP2_write_data_a <= Twrite_buf[2];
+				
+				// WRITE S*******************************************
+				DP3_addr_a <= DP3_addr_a + 7'd1;
+				M2_SRAM_we_n <= 1'b1;
+				M2_state <= M2_MEGA_CTWS_LEAD_OUT_5;
+				
+			end
+			
+			M2_MEGA_CTWS_LEAD_OUT_5 :begin
+				// read S' dta from DP1
+				DP1_addr_a <= DP1_addr_a + 7'd1;
+				
+			   S_P <= $signed(DP1_read_data_a);
+				
+				// assign muliliers
+				CX1 <= $signed(mult1);
+				CX2 <= $signed(mult2);
+				CX3 <= $signed(mult3);
+				CX4 <= $signed(mult4);
+			
+				// assign col_i
+				if(half_flag == 1'b0)begin
+					C_col_i1 <= 3'd0;
+				end else begin
+					C_col_i1 <= 3'd4;
+				end
+				
+				C_col_i2 <= C_col_i1  + 3'd1;
+				C_col_i3 <= C_col_i1  + 3'd2;
+				C_col_i4 <= C_col_i1  + 3'd3;
+				
+				ROW_INDEX <= ROW_INDEX + 3'd1;
+				
+				// increment accmulartor
+				T_ACC_one <= T_ACC_one + Result_one;
+				T_ACC_two <= T_ACC_two + Result_two;
+				T_ACC_three <= T_ACC_three + Result_three;
+				T_ACC_four <= T_ACC_four + Result_four;
+				
+				// write T[0]
+				DP2_addr_a <= DP2_addr_a + 7'd1;
+				DP2_we_n_a <= 1'd1;
+				
+				DP2_write_data_a <= Twrite_buf[3];
+				
+				// WRITE S*******************************************
+				DP3_addr_a <= DP3_addr_a + 7'd1;
+				S1_buf <= DP3_read_data_a;
+				
+				M2_state <= M2_MEGA_CTWS_LEAD_OUT_6;
+				
+			end
+			
+			M2_MEGA_CTWS_LEAD_OUT_6 :begin
+				// read S' dta from DP1
+				DP1_addr_a <= DP1_addr_a + 7'd1;
+				
+			   S_P <= $signed(DP1_read_data_a);
+				
+				// assign muliliers
+				CX1 <= $signed(mult1);
+				CX2 <= $signed(mult2);
+				CX3 <= $signed(mult3);
+				CX4 <= $signed(mult4);
+			
+				// assign col_i
+				if(half_flag == 1'b0)begin
+					C_col_i1 <= 3'd0;
+				end else begin
+					C_col_i1 <= 3'd4;
+				end
+				
+				C_col_i2 <= C_col_i1  + 3'd1;
+				C_col_i3 <= C_col_i1  + 3'd2;
+				C_col_i4 <= C_col_i1  + 3'd3;
+				
+				ROW_INDEX <= ROW_INDEX + 3'd1;
+				
+				// increment accmulartor
+				T_ACC_one <= T_ACC_one + Result_one;
+				T_ACC_two <= T_ACC_two + Result_two;
+				T_ACC_three <= T_ACC_three + Result_three;
+				T_ACC_four <= T_ACC_four + Result_four;
+				
+				// WRITE S*******************************************
+				S2_buf <= DP3_read_data_a;
+				
+				M2_state <= M2_MEGA_CTWS_LEAD_OUT_7;
+				
+			end
+			
+			M2_MEGA_CTWS_LEAD_OUT_7 :begin
+				CT_flag <= 1'b0;
+				CS_flag <= 1'b1;
+				// read S' dta from DP1
+				DP1_addr_a <= DP1_addr_a + 7'd1;
+				
+			   S_P <= $signed(DP1_read_data_a);
+				
+				half_flag <= ~half_flag;
+				
+				// assign muliliers
+				CX1 <= $signed(mult1);
+				CX2 <= $signed(mult2);
+				CX3 <= $signed(mult3);
+				CX4 <= $signed(mult4);
+			
+				// assign col_i
+				if(half_flag == 1'b0)begin
+					C_col_i1 <= 3'd0;
+				end else begin
+					C_col_i1 <= 3'd4;
+				end
+				
+				C_col_i2 <= C_col_i1  + 3'd1;
+				C_col_i3 <= C_col_i1  + 3'd2;
+				C_col_i4 <= C_col_i1  + 3'd3;
+				
+				ROW_INDEX <= ROW_INDEX + 3'd1;
+				
+				// increment accmulartor
+				T_ACC_one <= T_ACC_one + Result_one;
+				T_ACC_two <= T_ACC_two + Result_two;
+				T_ACC_three <= T_ACC_three + Result_three;
+				T_ACC_four <= T_ACC_four + Result_four;
+				
+				First_Write <= 1'b1;
+				// WRITE S*******************************************
+				M2_SRAM_we_n <= 1'b0;
+				M2_SRAM_address <= M2_write_address;
+				M2_write_address <= M2_write_address + 18'd1;
+				M2_SRAM_write_data <= {Result_S1,Result_S2};
+				
+			if(MEGA_state_counter < 13'd2399) begin
+				MEGA_state_counter <= MEGA_state_counter + 13'd1;
+				M2_state <= M2_MEGA_CSFS_LEAD_IN_0; 
+			end else begin
+				MEGA_state_counter <= 13'd0;
+				M2_state <= M2_CS_LEAD_IN_0;
+			end
+				
+			end
+			
+			M2_CS_LEAD_IN_0 :begin
+				DP1_addr_a <=7'd0;
+				DP1_we_n_a <= 1'd0;
+				DP1_we_n_b <= 1'd0;
+				//COMPUTE S***********************************
+				// assign muliliers
+				CX1 <= $signed(mult1);
+				CX2 <= $signed(mult2);
+				CX3 <= $signed(mult3);
+				CX4 <= $signed(mult4);
+				// prepare to Compute S
+
+				
+				// assign col_i
+				if(half_flag == 1'b0)begin
+					C_col_i1 <= 3'd0;
+				end else begin
+					C_col_i1 <= 3'd4;
+				end
+				
+				C_col_i2 <= C_col_i1  + 3'd1;
+				C_col_i3 <= C_col_i1  + 3'd2;
+				C_col_i4 <= C_col_i1  + 3'd3;
+				
+				ROW_INDEX <= ROW_INDEX + 3'd1;
+				
+				S_P <= $signed(DP1_read_data_a);
+				// increment accmulartor for previous CT
+				T_ACC_one <= T_ACC_one + Result_one;
+				T_ACC_two <= T_ACC_two + Result_two;
+				T_ACC_three <= T_ACC_three + Result_three;
+				T_ACC_four <= T_ACC_four + Result_four;
+				
+				// Read_DP2
+				DP2_we_n_b <= 1'b0;
+				DP2_addr_b <= DP2_addr_b + 7'd8;
+				
+				// stop write s
+				M2_SRAM_we_n <= 1'b1;
+				M2_state <= M2_CS_LEAD_IN_1;
+				
+			end
+			
+			M2_CS_LEAD_IN_1 : begin
+				// assign muliliers
+				CX1 <= $signed(mult1);
+				CX2 <= $signed(mult2);
+				CX3 <= $signed(mult3);
+				CX4 <= $signed(mult4);
+				
+				// assign col_i
+				if(half_flag == 1'b0)begin
+					C_col_i1 <= 3'd0;
+				end else begin
+					C_col_i1 <= 3'd4;
+				end
+				
+				C_col_i2 <= C_col_i1  + 3'd1;
+				C_col_i3 <= C_col_i1  + 3'd2;
+				C_col_i4 <= C_col_i1  + 3'd3;
+				
+				ROW_INDEX <= ROW_INDEX + 3'd1;
+				
+				// increment accmulartor for previous CT
+				S_ACC_one <=  Result_one;
+				S_ACC_two <= Result_two;
+				S_ACC_three <= Result_three;
+				S_ACC_four <=  Result_four;
+				
+				// take care of value from prev CT
+				Twrite_buf[0] <= Result_T_one;
+				Twrite_buf[1] <= Result_T_two;
+				Twrite_buf[2] <= Result_T_three;
+				Twrite_buf[3] <= Result_T_four;
+				
+
+				// Read_DP2
+				DP2_addr_b <= DP2_addr_b + 7'd8; 
+				DP2_we_n_b <= 1'b0;
+				S_P <= $signed(DP2_read_data_b);
+				
+				M2_state <= M2_CS_LEAD_IN_2;
+			end
+			
+			M2_CS_LEAD_IN_2 : begin
+				// assign muliliers
+				CX1 <= $signed(mult1);
+				CX2 <= $signed(mult2);
+				CX3 <= $signed(mult3);
+				CX4 <= $signed(mult4);
+				
+				// assign col_i
+				if(half_flag == 1'b0)begin
+					C_col_i1 <= 3'd0;
+				end else begin
+					C_col_i1 <= 3'd4;
+				end
+				
+				C_col_i2 <= C_col_i1  + 3'd1;
+				C_col_i3 <= C_col_i1  + 3'd2;
+				C_col_i4 <= C_col_i1  + 3'd3;
+				
+				ROW_INDEX <= ROW_INDEX + 3'd1;
+				
+				// increment accmulartor for previous CT
+				S_ACC_one <= S_ACC_one + Result_one;
+				S_ACC_two <= S_ACC_two + Result_two;
+				S_ACC_three <= S_ACC_three + Result_three;
+				S_ACC_four <= S_ACC_four + Result_four;
+				
+				
+				// Read_DP2 T
+				DP2_we_n_b <= 1'b0;
+				DP2_addr_b <= DP2_addr_b + 7'd8;
+				S_P <= $signed(DP2_read_data_b);
+				// Write Lefted T
+				DP2_we_n_a <= 1'b1;
+				DP2_write_data_a <= Twrite_buf[0];
+				DP2_addr_a <= DP2_addr_a + 7'd1;
+				
+				
+				M2_state <= M2_CS_LEAD_IN_3;
+			end
+			
+			M2_CS_LEAD_IN_3 : begin
+				//COMPUTE S***********************************
+				// assign muliliers
+				CX1 <= $signed(mult1);
+				CX2 <= $signed(mult2);
+				CX3 <= $signed(mult3);
+				CX4 <= $signed(mult4);
+				
+				// assign col_i
+				if(half_flag == 1'b0)begin
+					C_col_i1 <= 3'd0;
+				end else begin
+					C_col_i1 <= 3'd4;
+				end
+				
+				C_col_i2 <= C_col_i1  + 3'd1;
+				C_col_i3 <= C_col_i1  + 3'd2;
+				C_col_i4 <= C_col_i1  + 3'd3;
+				
+				ROW_INDEX <= ROW_INDEX + 3'd1;
+				
+				// increment accmulartor for previous CT
+				S_ACC_one <= S_ACC_one + Result_one;
+				S_ACC_two <= S_ACC_two + Result_two;
+				S_ACC_three <= S_ACC_three + Result_three;
+				S_ACC_four <= S_ACC_four + Result_four;
+				
+				// Read_DP2
+				DP2_we_n_b <= 1'b0;
+				DP2_addr_b <= DP2_addr_b + 7'd8;
+				S_P <= $signed(DP2_read_data_b);
+				// Write Lefted T from CT
+				DP2_write_data_a <= Twrite_buf[1];
+				DP2_addr_a <= DP2_addr_a + 7'd1;
+						
+				M2_state <= M2_CS_LEAD_IN_4;
+			end
+			
+			M2_CS_LEAD_IN_4 : begin
+				// assign muliliers
+				CX1 <= $signed(mult1);
+				CX2 <= $signed(mult2);
+				CX3 <= $signed(mult3);
+				CX4 <= $signed(mult4);
+				
+				// assign col_i
+				if(half_flag == 1'b0)begin
+					C_col_i1 <= 3'd0;
+				end else begin
+					C_col_i1 <= 3'd4;
+				end
+				
+				C_col_i2 <= C_col_i1  + 3'd1;
+				C_col_i3 <= C_col_i1  + 3'd2;
+				C_col_i4 <= C_col_i1  + 3'd3;
+				
+				ROW_INDEX <= ROW_INDEX + 3'd1;
+				
+				// increment accmulartor for previous CT
+				S_ACC_one <= S_ACC_one + Result_one;
+				S_ACC_two <= S_ACC_two + Result_two;
+				S_ACC_three <= S_ACC_three + Result_three;
+				S_ACC_four <= S_ACC_four + Result_four;
+				
+				
+				// Read_DP2 T
+				DP2_we_n_b <= 1'b0;
+				DP2_addr_b <= DP2_addr_b + 7'd8;
+				S_P <= $signed(DP2_read_data_b);
+				// Write Lefted T
+				DP2_write_data_a <= Twrite_buf[2];
+				DP2_addr_a <= DP2_addr_a + 7'd1;
+				
+				
+				M2_state <= M2_CS_LEAD_IN_5;
+			end
+			
+			M2_CS_LEAD_IN_5 : begin
+				//COMPUTE S***********************************
+				// assign muliliers
+				CX1 <= $signed(mult1);
+				CX2 <= $signed(mult2);
+				CX3 <= $signed(mult3);
+				CX4 <= $signed(mult4);
+				
+				// assign col_i
+				if(half_flag == 1'b0)begin
+					C_col_i1 <= 3'd0;
+				end else begin
+					C_col_i1 <= 3'd4;
+				end
+				
+				C_col_i2 <= C_col_i1  + 3'd1;
+				C_col_i3 <= C_col_i1  + 3'd2;
+				C_col_i4 <= C_col_i1  + 3'd3;
+				
+				ROW_INDEX <= ROW_INDEX + 3'd1;
+				
+				// increment accmulartor for previous CT
+				S_ACC_one <= S_ACC_one + Result_one;
+				S_ACC_two <= S_ACC_two + Result_two;
+				S_ACC_three <= S_ACC_three + Result_three;
+				S_ACC_four <= S_ACC_four + Result_four;
+				
+				// Read_DP2
+				DP2_we_n_b <= 1'b0;
+				DP2_addr_b <= DP2_addr_b + 7'd8;
+				S_P <= $signed(DP2_read_data_b);
+				// Write Lefted T from CT
+				DP2_write_data_a <= Twrite_buf[3];
+				DP2_addr_a <= DP2_addr_a + 7'd1;
+				
+				M2_state <= M2_CS_LEAD_IN_6;
+			end
+			
+			M2_CS_LEAD_IN_6:begin
+				// assign muliliers
+				CX1 <= $signed(mult1);
+				CX2 <= $signed(mult2);
+				CX3 <= $signed(mult3);
+				CX4 <= $signed(mult4);
+				
+				// assign col_i
+				if(half_flag == 1'b0)begin
+					C_col_i1 <= 3'd0;
+				end else begin
+					C_col_i1 <= 3'd4;
+				end
+				
+				C_col_i2 <= C_col_i1  + 3'd1;
+				C_col_i3 <= C_col_i1  + 3'd2;
+				C_col_i4 <= C_col_i1  + 3'd3;
+				
+				ROW_INDEX <= ROW_INDEX + 3'd1;
+				
+				// reset half_flag
+				half_flag <= ~half_flag;
+				
+				// increment accmulartor for previous CT
+				S_ACC_one <= S_ACC_one + Result_one;
+				S_ACC_two <= S_ACC_two + Result_two;
+				S_ACC_three <= S_ACC_three + Result_three;
+				S_ACC_four <= S_ACC_four + Result_four;
+				
+				// disable write from PREV_T
+				DP2_we_n_a <= 1'b0;
+				// Read_DP2 T
+				DP2_we_n_b <= 1'b0;
+				DP2_addr_b <= DP2_addr_b + 7'd8;
+				S_P <= $signed(DP2_read_data_b);
+				M2_state <= M2_CS_LEAD_IN_7;
+			end
+			
+			M2_CS_LEAD_IN_7 : begin
+				//COMPUTE S***********************************
+				if(half_flag == 1) begin
+					DP2_addr_b <=DP2_addr_b - 7'd56;
+				end else begin
+					DP2_addr_b <= DP2_addr_b  - 7'd55;
+				end
+				S_P <= $signed(DP2_read_data_b);
+				// assign muliliers
+				CX1 <= $signed(mult1);
+				CX2 <= $signed(mult2);
+				CX3 <= $signed(mult3);
+				CX4 <= $signed(mult4);
+				
+				// assign col_i
+				if(half_flag == 1'b0)begin
+					C_col_i1 <= 3'd0;
+				end else begin
+					C_col_i1 <= 3'd4;
+				end
+				
+				C_col_i2 <= C_col_i1  + 3'd1;
+				C_col_i3 <= C_col_i1  + 3'd2;
+				C_col_i4 <= C_col_i1  + 3'd3;
+				
+				ROW_INDEX <= ROW_INDEX + 3'd1;
+				
+				// increment accmulartor for previous CT
+				S_ACC_one <= S_ACC_one + Result_one;
+				S_ACC_two <= S_ACC_two + Result_two;
+				S_ACC_three <= S_ACC_three + Result_three;
+				S_ACC_four <= S_ACC_four + Result_four;
+				
+				M2_state <= M2_CS_COMMON_0;
+			end
+			
+			M2_CS_COMMON_0: begin
+				//COMPUTE S***********************************
+				// read T dta from DP2
+				DP2_addr_b <= DP2_addr_b + 7'd8;
+			   S_P <= $signed(DP2_read_data_b);
+				
+				// assign muliliers
+				CX1 <= $signed(mult1);
+				CX2 <= $signed(mult2);
+				CX3 <= $signed(mult3);
+				CX4 <= $signed(mult4);
+				
+				// assign col_i
+				if(half_flag == 1'b0)begin
+					C_col_i1 <= 3'd0;
+				end else begin
+					C_col_i1 <= 3'd4;
+				end
+				
+				C_col_i2 <= C_col_i1  + 3'd1;
+				C_col_i3 <= C_col_i1  + 3'd2;
+				C_col_i4 <= C_col_i1  + 3'd3;
+				
+				ROW_INDEX <= ROW_INDEX + 3'd1;
+				
+				
+				// increment accmulartor for previous CT
+				S_ACC_one <= S_ACC_one + Result_one;
+				S_ACC_two <= S_ACC_two + Result_two;
+				S_ACC_three <= S_ACC_three + Result_three;
+				S_ACC_four <= S_ACC_four + Result_four;
+				
+				M2_state <= M2_CS_COMMON_1;
+			end
+			
+			M2_CS_COMMON_1: begin
+				// assign muliliers
+				CX1 <= $signed(mult1);
+				CX2 <= $signed(mult2);
+				CX3 <= $signed(mult3);
+				CX4 <= $signed(mult4);
+				
+				// assign col_i
+				if(half_flag == 1'b0)begin
+					C_col_i1 <= 3'd0;
+				end else begin
+					C_col_i1 <= 3'd4;
+				end
+				
+				C_col_i2 <= C_col_i1  + 3'd1;
+				C_col_i3 <= C_col_i1  + 3'd2;
+				C_col_i4 <= C_col_i1  + 3'd3;
+				
+				ROW_INDEX <= ROW_INDEX + 3'd1;
+				
+
+				
+				// increment accmulartor for previous CT
+				Swrite_buf[0] <= S_ACC_one;
+				Swrite_buf[1] <= S_ACC_two; 
+				Swrite_buf[2] <= S_ACC_three;
+				Swrite_buf[3] <= S_ACC_four;
+				// Read_DP2
+				DP2_we_n_b <= 1'b0;
+				DP2_addr_b <= DP2_addr_b + 7'd8;
+				S_P <= $signed(DP2_read_data_b);
+				
+				
+				M2_state <= M2_CS_COMMON_2;
+			end
+			
+			M2_CS_COMMON_2:begin
+				// assign muliliers
+				CX1 <= $signed(mult1);
+				CX2 <= $signed(mult2);
+				CX3 <= $signed(mult3);
+				CX4 <= $signed(mult4);
+				
+				// assign col_i
+				if(half_flag == 1'b0)begin
+					C_col_i1 <= 3'd0;
+				end else begin
+					C_col_i1 <= 3'd4;
+				end
+				
+				C_col_i2 <= C_col_i1  + 3'd1;
+				C_col_i3 <= C_col_i1  + 3'd2;
+				C_col_i4 <= C_col_i1  + 3'd3;
+				
+				ROW_INDEX <= ROW_INDEX + 3'd1;
+
+				
+				// increment accmulartor for previous CT
+				S_ACC_one <= S_ACC_one + Result_one;
+				S_ACC_two <= S_ACC_two + Result_two;
+				S_ACC_three <= S_ACC_three + Result_three;
+				S_ACC_four <= S_ACC_four + Result_four;
+				
+				
+				// Read_DP2 T
+				DP2_we_n_b <= 1'b0;
+				DP2_addr_b <= DP2_addr_b + 7'd8;
+				S_P <= $signed(DP2_read_data_b);
+				// Write S
+				DP3_we_n_b <= 1'b1;
+				
+				if(First_Write == 1'b1)begin
+					DP3_addr_b <= 7'd0;
+					First_Write <= 1'b0;
+				end else begin
+					DP3_addr_b <= DP3_addr_b + 7'd1;
+				end
+				
+				DP3_write_data_b <= Swrite_buf[0];
+				
+				M2_state <= M2_CS_COMMON_3;
+			end
+			
+			M2_CS_COMMON_3 :begin
+				//COMPUTE S***********************************
+				// assign muliliers
+				CX1 <= $signed(mult1);
+				CX2 <= $signed(mult2);
+				CX3 <= $signed(mult3);
+				CX4 <= $signed(mult4);
+				
+				// assign col_i
+				if(half_flag == 1'b0)begin
+					C_col_i1 <= 3'd0;
+				end else begin
+					C_col_i1 <= 3'd4;
+				end
+				
+				C_col_i2 <= C_col_i1  + 3'd1;
+				C_col_i3 <= C_col_i1  + 3'd2;
+				C_col_i4 <= C_col_i1  + 3'd3;
+				
+				ROW_INDEX <= ROW_INDEX + 3'd1;
+				
+				// increment accmulartor for previous CT
+				S_ACC_one <= S_ACC_one + Result_one;
+				S_ACC_two <= S_ACC_two + Result_two;
+				S_ACC_three <= S_ACC_three + Result_three;
+				S_ACC_four <= S_ACC_four + Result_four;
+				
+				// Read_DP2
+				DP2_we_n_b <= 1'b0;
+				DP2_addr_b <= DP2_addr_b + 7'd8;
+				S_P <= $signed(DP2_read_data_b);
+				
+				// Write S
+				DP3_we_n_b <= 1'b1;
+				DP3_addr_b <= DP3_addr_b + 7'd1;
+				DP3_write_data_b <= Swrite_buf[1];
+				
+				M2_state <= M2_CS_COMMON_4;
+			end
+			M2_CS_COMMON_4:begin
+				// assign muliliers
+				CX1 <= $signed(mult1);
+				CX2 <= $signed(mult2);
+				CX3 <= $signed(mult3);
+				CX4 <= $signed(mult4);
+				
+				// assign col_i
+				if(half_flag == 1'b0)begin
+					C_col_i1 <= 3'd0;
+				end else begin
+					C_col_i1 <= 3'd4;
+				end
+				
+				C_col_i2 <= C_col_i1  + 3'd1;
+				C_col_i3 <= C_col_i1  + 3'd2;
+				C_col_i4 <= C_col_i1  + 3'd3;
+				
+				ROW_INDEX <= ROW_INDEX + 3'd1;
+				
+				
+				// increment accmulartor for previous CT
+				S_ACC_one <= S_ACC_one + Result_one;
+				S_ACC_two <= S_ACC_two + Result_two;
+				S_ACC_three <= S_ACC_three + Result_three;
+				S_ACC_four <= S_ACC_four + Result_four;
+				
+				
+				// Read_DP2 T
+				DP2_we_n_b <= 1'b0;
+				DP2_addr_b <= DP2_addr_b + 7'd8;
+				S_P <= $signed(DP2_read_data_b);
+				// Write S
+				DP3_we_n_b <= 1'b1;
+				DP3_addr_b <= DP3_addr_b + 7'd1;
+				DP3_write_data_b <= Swrite_buf[2];
+				
+				M2_state <= M2_CS_COMMON_5;
+			end
+			
+			M2_CS_COMMON_5:begin
+				//COMPUTE S***********************************
+				// assign muliliers
+				CX1 <= $signed(mult1);
+				CX2 <= $signed(mult2);
+				CX3 <= $signed(mult3);
+				CX4 <= $signed(mult4);
+				
+				// assign col_i
+				if(half_flag == 1'b0)begin
+					C_col_i1 <= 3'd0;
+				end else begin
+					C_col_i1 <= 3'd4;
+				end
+				
+				C_col_i2 <= C_col_i1  + 3'd1;
+				C_col_i3 <= C_col_i1  + 3'd2;
+				C_col_i4 <= C_col_i1  + 3'd3;
+				
+				ROW_INDEX <= ROW_INDEX + 3'd1;
+				
+				
+				// increment accmulartor for previous CT
+				S_ACC_one <= S_ACC_one + Result_one;
+				S_ACC_two <= S_ACC_two + Result_two;
+				S_ACC_three <= S_ACC_three + Result_three;
+				S_ACC_four <= S_ACC_four + Result_four;
+				
+				// Read_DP2
+				DP2_we_n_b <= 1'b0;
+				DP2_addr_b <= DP2_addr_b + 7'd8;
+				S_P <= $signed(DP2_read_data_b);
+				
+				// Write S
+				DP3_we_n_b <= 1'b1;
+				DP3_addr_b <= DP3_addr_b + 7'd1;
+				DP3_write_data_b <= Swrite_buf[3];
+				
+				M2_state <= M2_CS_COMMON_6;
+			end
+			
+			M2_CS_COMMON_6 : begin
+				/// assign muliliers
+				CX1 <= $signed(mult1);
+				CX2 <= $signed(mult2);
+				CX3 <= $signed(mult3);
+				CX4 <= $signed(mult4);
+				
+				
+				// reset half_flag
+				half_flag <= ~half_flag;
+				
+				// assign col_i
+				if(half_flag == 1'b0)begin
+					C_col_i1 <= 3'd0;
+				end else begin
+					C_col_i1 <= 3'd4;
+				end
+				
+				C_col_i2 <= C_col_i1  + 3'd1;
+				C_col_i3 <= C_col_i1  + 3'd2;
+				C_col_i4 <= C_col_i1  + 3'd3;
+				
+				ROW_INDEX <= ROW_INDEX + 3'd1;
+				
+				DP3_we_n_b <= 1'b0;
+				// increment accmulartor for previous CT
+				S_ACC_one <= S_ACC_one + Result_one;
+				S_ACC_two <= S_ACC_two + Result_two;
+				S_ACC_three <= S_ACC_three + Result_three;
+				S_ACC_four <= S_ACC_four + Result_four;
+				
+				
+				// Read_DP2 T
+				DP2_we_n_b <= 1'b0;
+				DP2_addr_b <= DP2_addr_b + 7'd8;
+				S_P <= $signed(DP2_read_data_b);
+
+				
+				M2_state <= M2_CS_COMMON_7;
+			end
+			
+			M2_CS_COMMON_7: begin
+				//COMPUTE S***********************************
+				if(half_flag == 1'b1) begin
+					DP2_addr_b <=DP2_addr_b - 7'd56;
+				end else begin
+					DP2_addr_b <= DP2_addr_b  - 7'd55;
+				end
+				// assign muliliers
+				CX1 <= $signed(mult1);
+				CX2 <= $signed(mult2);
+				CX3 <= $signed(mult3);
+				CX4 <= $signed(mult4);
+				
+				// assign col_i
+				if(half_flag == 1'b0)begin
+					C_col_i1 <= 3'd0;
+				end else begin
+					C_col_i1 <= 3'd4;
+				end
+				
+				C_col_i2 <= C_col_i1  + 3'd1;
+				C_col_i3 <= C_col_i1  + 3'd2;
+				C_col_i4 <= C_col_i1  + 3'd3;
+				
+				ROW_INDEX <= ROW_INDEX + 3'd1;
+				
+				// increment accmulartor for previous CT
+				S_ACC_one <= S_ACC_one + Result_one;
+				S_ACC_two <= S_ACC_two + Result_two;
+				S_ACC_three <= S_ACC_three + Result_three;
+				S_ACC_four <= S_ACC_four + Result_four;
+				
+				// Read_DP2
+				DP2_we_n_b <= 1'b0;
+				S_P <= $signed(DP2_read_data_b);
+				
+				if(State_counter <= 7'd13)begin
+					M2_state <= M2_CS_COMMON_0;
+					//update state_counter
+					State_counter <= State_counter + 7'd1; 
+				end else begin
+					M2_state <= M2_CS_LEAD_OUT_0;
+					//update state_counter
+					State_counter <= 7'd0;
+				end
+			end
+			
+			M2_CS_LEAD_OUT_0 : begin
+				//COMPUTE S***********************************
+				// read T dta from DP2
+				DP2_addr_b <= DP2_addr_b  + 7'd8;
+			   S_P <= $signed(DP2_read_data_b);
+				
+				// assign muliliers
+				CX1 <= $signed(mult1);
+				CX2 <= $signed(mult2);
+				CX3 <= $signed(mult3);
+				CX4 <= $signed(mult4);
+				
+				// assign col_i
+				if(half_flag == 1'b0)begin
+					C_col_i1 <= 3'd0;
+				end else begin
+					C_col_i1 <= 3'd4;
+				end
+				
+				C_col_i2 <= C_col_i1  + 3'd1;
+				C_col_i3 <= C_col_i1  + 3'd2;
+				C_col_i4 <= C_col_i1  + 3'd3;
+				
+				ROW_INDEX <= ROW_INDEX + 3'd1;
+				
+				// increment accmulartor for previous CT
+				S_ACC_one <= S_ACC_one + Result_one;
+				S_ACC_two <= S_ACC_two + Result_two;
+				S_ACC_three <= S_ACC_three + Result_three;
+				S_ACC_four <= S_ACC_four + Result_four;
+				
+				
+				M2_state <= M2_CS_LEAD_OUT_1;
+			end
+			
+			M2_CS_LEAD_OUT_1: begin
+				// assign muliliers
+				CX1 <= $signed(mult1);
+				CX2 <= $signed(mult2);
+				CX3 <= $signed(mult3);
+				CX4 <= $signed(mult4);
+				
+				// assign col_i
+				if(half_flag == 1'b0)begin
+					C_col_i1 <= 3'd0;
+				end else begin
+					C_col_i1 <= 3'd4;
+				end
+				
+				C_col_i2 <= C_col_i1  + 3'd1;
+				C_col_i3 <= C_col_i1  + 3'd2;
+				C_col_i4 <= C_col_i1  + 3'd3;
+				
+				ROW_INDEX <= ROW_INDEX + 3'd1;
+				
+				
+				// Read_DP2
+				DP2_we_n_b <= 1'b0;
+				DP2_addr_b <= DP2_addr_b + 7'd8;
+				S_P <= $signed(DP2_read_data_b);
+				
+				// take care of value from prev CS
+				Swrite_buf[0] <= S_ACC_one;
+				Swrite_buf[1] <= S_ACC_two; 
+				Swrite_buf[2] <= S_ACC_three;
+				Swrite_buf[3] <= S_ACC_four;
+				
+				M2_state <= M2_CS_LEAD_OUT_2;
+			end
+			
+			M2_CS_LEAD_OUT_2: begin
+				// assign muliliers
+				CX1 <= $signed(mult1);
+				CX2 <= $signed(mult2);
+				CX3 <= $signed(mult3);
+				CX4 <= $signed(mult4);
+				
+				// assign col_i
+				if(half_flag == 1'b0)begin
+					C_col_i1 <= 3'd0;
+				end else begin
+					C_col_i1 <= 3'd4;
+				end
+				
+				C_col_i2 <= C_col_i1  + 3'd1;
+				C_col_i3 <= C_col_i1  + 3'd2;
+				C_col_i4 <= C_col_i1  + 3'd3;
+				
+				ROW_INDEX <= ROW_INDEX + 3'd1;
+				
+				// increment accmulartor for previous CT
+				S_ACC_one <= S_ACC_one + Result_one;
+				S_ACC_two <= S_ACC_two + Result_two;
+				S_ACC_three <= S_ACC_three + Result_three;
+				S_ACC_four <= S_ACC_four + Result_four;
+				
+				
+				// Read_DP2 T
+				DP2_we_n_b <= 1'b0;
+				DP2_addr_b <= DP2_addr_b + 7'd8;
+				S_P <= $signed(DP2_read_data_b);
+				// Write S
+				DP3_we_n_b <= 1'b1;
+				DP3_addr_b <= DP3_addr_b + 7'd1;
+				DP3_write_data_b <= Swrite_buf[0];
+				//FETCH_S'*****************************************
+				DP2_we_n_b <= 1'b0;
+				M2_SRAM_address <= M2_READ_address;
+				
+				M2_state <= M2_CS_LEAD_OUT_3;
+			end
+			
+			M2_CS_LEAD_OUT_3 : begin
+				//COMPUTE S***********************************
+				// assign muliliers
+				CX1 <= $signed(mult1);
+				CX2 <= $signed(mult2);
+				CX3 <= $signed(mult3);
+				CX4 <= $signed(mult4);
+				
+				// assign col_i
+				if(half_flag == 1'b0)begin
+					C_col_i1 <= 3'd0;
+				end else begin
+					C_col_i1 <= 3'd4;
+				end
+				
+				C_col_i2 <= C_col_i1  + 3'd1;
+				C_col_i3 <= C_col_i1  + 3'd2;
+				C_col_i4 <= C_col_i1  + 3'd3;
+				
+				ROW_INDEX <= ROW_INDEX + 3'd1;
+				
+				// increment accmulartor for previous CT
+				S_ACC_one <= S_ACC_one + Result_one;
+				S_ACC_two <= S_ACC_two + Result_two;
+				S_ACC_three <= S_ACC_three + Result_three;
+				S_ACC_four <= S_ACC_four + Result_four;
+				
+				// Read_DP2
+				DP2_we_n_b <= 1'b0;
+				DP2_addr_b <= DP2_addr_b + 7'd8;
+				S_P <= $signed(DP2_read_data_b);
+				
+				// Write S
+				DP3_we_n_b <= 1'b1;
+				DP3_addr_b <= DP3_addr_b + 7'd1;
+				DP3_write_data_b <= Swrite_buf[1];
+				
+				M2_state <= M2_CS_LEAD_OUT_4;
+			end
+			
+			M2_CS_LEAD_OUT_4 : begin
+				// assign muliliers
+				CX1 <= $signed(mult1);
+				CX2 <= $signed(mult2);
+				CX3 <= $signed(mult3);
+				CX4 <= $signed(mult4);
+				// assign col_i
+				if(half_flag == 1'b0)begin
+					C_col_i1 <= 3'd0;
+				end else begin
+					C_col_i1 <= 3'd4;
+				end
+				
+				C_col_i2 <= C_col_i1  + 3'd1;
+				C_col_i3 <= C_col_i1  + 3'd2;
+				C_col_i4 <= C_col_i1  + 3'd3;
+				
+				ROW_INDEX <= ROW_INDEX + 3'd1;
+				
+				
+				// increment accmulartor for previous CT
+				S_ACC_one <= S_ACC_one + Result_one;
+				S_ACC_two <= S_ACC_two + Result_two;
+				S_ACC_three <= S_ACC_three + Result_three;
+				S_ACC_four <= S_ACC_four + Result_four;
+				
+				
+				// Read_DP2 T
+				DP2_we_n_b <= 1'b0;
+				DP2_addr_b <= DP2_addr_b + 7'd8;
+				S_P <= $signed(DP2_read_data_b);
+				// Write S
+				DP3_we_n_b <= 1'b1;
+				DP3_addr_b <= DP3_addr_b + 7'd1;
+				DP3_write_data_b <= Swrite_buf[2];
+				
+				M2_SRAM_address <= M2_READ_address;
+				
+				M2_state <= M2_CS_LEAD_OUT_5;
+			end
+			
+			M2_CS_LEAD_OUT_5 : begin
+				//COMPUTE S***********************************
+				// assign muliliers
+				CX1 <= $signed(mult1);
+				CX2 <= $signed(mult2);
+				CX3 <= $signed(mult3);
+				CX4 <= $signed(mult4);
+				
+				// assign col_i
+				if(half_flag == 1'b0)begin
+					C_col_i1 <= 3'd0;
+				end else begin
+					C_col_i1 <= 3'd4;
+				end
+				
+				C_col_i2 <= C_col_i1  + 3'd1;
+				C_col_i3 <= C_col_i1  + 3'd2;
+				C_col_i4 <= C_col_i1  + 3'd3;
+				
+				ROW_INDEX <= ROW_INDEX + 3'd1;
+				
+				// increment accmulartor for previous CT
+				S_ACC_one <= S_ACC_one + Result_one;
+				S_ACC_two <= S_ACC_two + Result_two;
+				S_ACC_three <= S_ACC_three + Result_three;
+				S_ACC_four <= S_ACC_four + Result_four;
+				
+				// Read_DP2
+				DP2_we_n_b <= 1'b0;
+				DP2_addr_b <= DP2_addr_b + 7'd8;
+				S_P <= $signed(DP2_read_data_b);
+				
+				// Write S
+				DP3_we_n_b <= 1'b1;
+				DP3_addr_b <= DP3_addr_b + 7'd1;
+				DP3_write_data_b <= Swrite_buf[3];
+				
+				M2_state <= M2_CS_LEAD_OUT_6;
+			end
+			
+			M2_CS_LEAD_OUT_6 : begin
+				// assign muliliers
+				CX1 <= $signed(mult1);
+				CX2 <= $signed(mult2);
+				CX3 <= $signed(mult3);
+				CX4 <= $signed(mult4);
+				// assign col_i
+				if(half_flag == 1'b0)begin
+					C_col_i1 <= 3'd0;
+				end else begin
+					C_col_i1 <= 3'd4;
+				end
+				
+				C_col_i2 <= C_col_i1  + 3'd1;
+				C_col_i3 <= C_col_i1  + 3'd2;
+				C_col_i4 <= C_col_i1  + 3'd3;
+				
+				ROW_INDEX <= ROW_INDEX + 3'd1;
+				
+				// reset half_flag
+				half_flag <= ~half_flag;
+				
+				// increment accmulartor for previous CT
+				S_ACC_one <= S_ACC_one + Result_one;
+				S_ACC_two <= S_ACC_two + Result_two;
+				S_ACC_three <= S_ACC_three + Result_three;
+				S_ACC_four <= S_ACC_four + Result_four;
+				
+				
+				// Read_DP2 T
+				DP2_we_n_b <= 1'b0;
+				DP2_addr_b <= DP2_addr_b + 7'd8;
+				S_P <= $signed(DP2_read_data_b);
+				// stop wirte to DP3
+				DP3_we_n_b <= 1'b0;
+				
+				M2_state <= M2_CS_LEAD_OUT_7;
+			end
+			
+			M2_CS_LEAD_OUT_7: begin
+				//COMPUTE S***********************************
+				// assign muliliers
+				CX1 <= $signed(mult1);
+				CX2 <= $signed(mult2);
+				CX3 <= $signed(mult3);
+				CX4 <= $signed(mult4);
+				// assign col_i
+				if(half_flag == 1'b0)begin
+					C_col_i1 <= 3'd0;
+				end else begin
+					C_col_i1 <= 3'd4;
+				end
+				
+				C_col_i2 <= C_col_i1  + 3'd1;
+				C_col_i3 <= C_col_i1  + 3'd2;
+				C_col_i4 <= C_col_i1  + 3'd3;
+				
+				ROW_INDEX <= ROW_INDEX + 3'd1;
+				
+				// increment accmulartor for previous CT
+				S_ACC_one <= S_ACC_one + Result_one;
+				S_ACC_two <= S_ACC_two + Result_two;
+				S_ACC_three <= S_ACC_three + Result_three;
+				S_ACC_four <= S_ACC_four + Result_four;
+				
+				// Read_DP2
+				DP2_we_n_b <= 1'b0;
+				DP2_addr_b <= DP2_addr_b + 7'd8;
+				S_P <= $signed(DP2_read_data_b);
+				First_Write <= 1'b1;
+			
+				M2_state <= M2_WS_LEAD_IN_0;
+			end
+			
+			M2_WS_LEAD_IN_0: begin
+			
+				//COMPUTE S***********************************
+				// assign muliliers
+				CX1 <= $signed(mult1);
+				CX2 <= $signed(mult2);
+				CX3 <= $signed(mult3);
+				CX4 <= $signed(mult4);
+				
+				/// assign col_i
+				if(half_flag == 1'b0)begin
+					C_col_i1 <= 3'd0;
+				end else begin
+					C_col_i1 <= 3'd4;
+				end
+				
+				C_col_i2 <= C_col_i1  + 3'd1;
+				C_col_i3 <= C_col_i1  + 3'd2;
+				C_col_i4 <= C_col_i1  + 3'd3;
+				
+				ROW_INDEX <= ROW_INDEX + 3'd1;
+				
+				
+				S_ACC_one <= S_ACC_one + Result_one;
+				S_ACC_two <= S_ACC_two + Result_two;
+				S_ACC_three <= S_ACC_three + Result_three;
+				S_ACC_four <= S_ACC_four + Result_four;
+				
+				
+				M2_state <= M2_WS_LEAD_IN_1;
+			end
+			
+			M2_WS_LEAD_IN_1: begin
+				Swrite_buf[0] <= S_ACC_one;
+				Swrite_buf[1] <= S_ACC_two; 
+				Swrite_buf[2] <= S_ACC_three;
+				Swrite_buf[3] <= S_ACC_four;
+				M2_state <= M2_WS_LEAD_IN_2;
+			end
+			
+			M2_WS_LEAD_IN_2: begin
+				DP3_we_n_b <= 1'b1;
+				DP3_addr_b <= DP3_addr_b + 7'd1;
+				DP3_write_data_b <= Swrite_buf[0];
+				
+				
+				M2_state <= M2_WS_LEAD_IN_3;
+			end
+			
+			M2_WS_LEAD_IN_3: begin
+				DP3_we_n_b <= 1'b1;
+				DP3_addr_b <= DP3_addr_b + 7'd1;
+				DP3_write_data_b <= Swrite_buf[1];
+				
+				
+				M2_state <= M2_WS_LEAD_IN_4;
+			end
+			
+			M2_WS_LEAD_IN_4: begin
+				DP3_we_n_b <= 1'b1;
+				DP3_addr_b <= DP3_addr_b + 7'd1;
+				DP3_write_data_b <= Swrite_buf[2];
+				M2_state <= M2_WS_LEAD_IN_5;
+				
+				
+			end
+			
+			M2_WS_LEAD_IN_5: begin
+				DP3_we_n_b <= 1'b1;
+				DP3_addr_b <= DP3_addr_b + 7'd1;
+				DP3_write_data_b <= Swrite_buf[3];
+				
+				M2_state <= M2_WS_LEAD_IN_6;
+				
+			end
+			
+			M2_WS_LEAD_IN_6 : begin
+				// WRITE S*******************************************
+				DP3_addr_a <= 7'd0;
+				DP3_we_n_a <= 1'b0;
+				
+				DP3_addr_b <=7'd1;
+				DP3_we_n_a <= 1'b0;
+				
+				M2_state <= M2_WS_LEAD_IN_7;
+			end
+			
+			M2_WS_LEAD_IN_7 : begin
+				// WRITE S*******************************************
+				DP3_addr_a <= DP3_addr_a + 7'd2;
+				
+				DP3_addr_b <= DP3_addr_b + 7'd2;
+				
+				S1_buf <= DP3_read_data_a;
+				S2_buf<= DP3_read_data_b;
+				
+				State_counter <= 7'd0;
+				M2_state <= M2_WS_COMMON_0;
+			end
+					
+					
+				M2_WS_COMMON_0: begin
+			   
+				// WRITE S*******************************************
+				DP3_addr_a <= DP3_addr_a + 7'd2;
+				
+				DP3_addr_b <= DP3_addr_b + 7'd2;
+				
+				S1_buf <= DP3_read_data_a;
+				S2_buf<= DP3_read_data_b;
+				
+				M2_SRAM_we_n <= 1'b0;
+				M2_SRAM_address <= M2_write_address;
+				M2_write_address <= M2_write_address + 18'd1;
+				M2_SRAM_write_data <= {Result_S1,Result_S2};
+				
+				if(State_counter < 7'd30)begin
+					State_counter <= State_counter + 7'd1;
+					M2_state <= M2_WS_COMMON_0;
+				end else begin
+					M2_state <= M2_WS_LEAD_OUT_0;
+					Y_base <= 18'd0;
+					State_counter <= 7'd0;
+				end
+				
+			end
+			
+			M2_WS_LEAD_OUT_0:begin
+				S1_buf <= DP3_read_data_a;
+				S2_buf<= DP3_read_data_b;
+				M2_SRAM_address <= M2_write_address;
+				M2_write_address <= M2_write_address + 18'd1;
+				M2_SRAM_write_data <= {Result_S1,Result_S2};
+				M2_state <= M2_WS_LEAD_OUT_1;
+			end
+			
+			M2_WS_LEAD_OUT_1: begin
+				M2_SRAM_address <= M2_write_address;
+				M2_write_address <= M2_write_address + 18'd1;
+				M2_SRAM_write_data <= {Result_S1,Result_S2};
+				milestone_two_stop <= 1'b1;
+				M2_state <= M2_IDLE;
+			end
+			
+		endcase
+	end	
+end
+
+// M2_SRAM_address
+always_comb begin
+		M2_READ_address = {{{fetch_row_b,fetch_row_i},8'd0}+ {{fetch_row_b,fetch_row_i},6'd0}+{fetch_col_b, fetch_col_i}} + S_base;
+end
+
+
+// four Multiplier for computing
+always_comb begin 	
+		OP1 = CX1;
+		OP2 = S_P;
+	Result_one = $signed(OP1)*$signed(OP2);
+end
+
+assign Result_T_one = {{8{T_ACC_one[31]}},T_ACC_one[31:8]};
+
+
+// Multiplier for computing T2
+always_comb begin
+		OP3 = CX2;
+		OP4 = S_P;
+  Result_two = $signed(OP3)*$signed(OP4);
+end
+
+assign Result_T_two = {{8{T_ACC_two[31]}},T_ACC_two[31:8]};
+
+
+// Multiplier for computing T3
+always_comb begin 
+		OP5 = CX3;
+		OP6 = S_P;
+	Result_three = $signed(OP5)*$signed(OP6);
+end
+
+assign Result_T_three = {{8{T_ACC_three[31]}},T_ACC_three[31:8]};
+
+
+// Multiplier for computing T3
+always_comb begin 
+		OP7 = CX4;
+		OP8 = S_P;
+	Result_four = $signed(OP7)*$signed(OP8);
+end
+
+assign Result_T_four = {{8{T_ACC_four[31]}},T_ACC_four[31:8]};
+
+
+// for write s
+always_comb begin
+		Result_S1 = S1_buf[31]? 8'd0 : |S1_buf[30:24]? 8'd255 : S1_buf[23:16];
+		Result_S2 = S2_buf[31]? 8'd0 : |S2_buf[30:24]? 8'd255 : S2_buf[23:16];
+end
+
+//create value for C through mux*************************************************************************************************************************************	
+always_comb begin
+		
+		if(CT_flag == 1'b1)begin
+			C1_index = {ROW_INDEX, C_col_i1};
+		end else if( CS_flag == 1'b1)begin
+			C1_index = {ROW_INDEX, C_col_i1};
+		end else begin
+			C1_index = 6'd0;
+		end
+		
+		
+		if(C1_index <= 6'd7) begin
+			mult1 = 16'Sd1448;
+		end else if(C1_index == 6'd8) begin
+			mult1 = 16'Sd2008;
+		end else if(C1_index == 6'd9) begin
+			mult1 = 16'sd1702;
+		end else if(C1_index == 6'd10) begin
+			mult1 = 16'sd1137;
+		end else if(C1_index == 6'd11) begin
+			mult1 = 16'sd399;
+		end else if(C1_index == 6'd12) begin
+			mult1 = -16'sd399;
+		end else if(C1_index == 6'd13) begin
+			mult1 = -16'sd1137;
+		end else if(C1_index == 6'd14) begin
+			mult1 = -16'sd1702;
+		end else if(C1_index == 6'd15) begin
+			mult1 = -16'sd2008;
+		end else if(C1_index == 6'd16) begin
+			mult1 = 16'sd1892;
+		end else if(C1_index == 6'd17) begin
+			mult1 = 16'sd783;
+		end else if(C1_index == 6'd18) begin
+			mult1 = -16'sd783;
+		end else if(C1_index == 6'd19) begin
+			mult1 = -16'sd1892;
+		end else if(C1_index == 6'd20) begin
+			mult1 = -16'sd1892;
+		end else if(C1_index == 6'd21) begin
+			mult1 = -16'sd783;
+		end else if(C1_index == 6'd22) begin
+			mult1 = 16'sd783;
+		end else if(C1_index == 6'd23) begin
+			mult1 = 16'sd1892;
+		end else if(C1_index == 6'd24) begin
+			mult1 = 16'sd1702;
+		end else if(C1_index == 6'd25) begin
+			mult1 = -16'sd399;
+		end else if(C1_index == 6'd26) begin
+			mult1 = -16'sd2008;
+		end else if(C1_index == 6'd27) begin
+			mult1 = -16'sd1137;
+		end else if(C1_index == 6'd28) begin
+			mult1 = 16'sd1137;
+		end else if(C1_index == 6'd29) begin
+			mult1 = 16'sd2008;
+		end else if(C1_index == 6'd30) begin
+			mult1 = 16'sd399;
+		end else if(C1_index == 6'd31) begin
+			mult1 = -16'sd1702;
+		end else if(C1_index == 6'd32) begin
+			mult1 = 16'sd1448;
+		end else if(C1_index == 6'd33) begin
+			mult1 = -16'sd1448;
+		end else if(C1_index == 6'd34) begin
+			mult1 = -16'sd1448;
+		end else if(C1_index == 6'd35) begin
+			mult1 = 16'sd1448;
+		end else if(C1_index == 6'd36) begin
+			mult1 = 16'sd1448;
+		end else if(C1_index == 6'd37) begin
+			mult1 = -16'sd1448;
+		end else if(C1_index == 6'd38) begin
+			mult1 = -16'sd1448;
+		end else if(C1_index == 6'd39) begin
+			mult1 = 16'sd1448;
+		end else if(C1_index == 6'd40) begin
+			mult1 = 16'sd1137;
+		end else if(C1_index == 6'd41) begin
+			mult1 = -16'sd2008;
+		end else if(C1_index == 6'd42) begin
+			mult1 = 16'sd399;
+		end else if(C1_index == 6'd43) begin
+			mult1 = 16'sd1702;
+		end else if(C1_index == 6'd44) begin
+			mult1 = -16'sd1702;
+		end else if(C1_index == 6'd45) begin
+			mult1 = -16'sd399;
+		end else if(C1_index == 6'd46) begin
+			mult1 = 16'sd2008;
+		end else if(C1_index == 6'd47) begin
+			mult1 = -16'sd1137;
+		end else if(C1_index == 6'd48) begin
+			mult1 = 16'sd783;
+		end else if(C1_index == 6'd49) begin
+			mult1 = -16'sd1892;
+		end else if(C1_index == 6'd50) begin
+			mult1 = 16'sd1892;
+		end else if(C1_index == 6'd51) begin
+			mult1 = -16'sd783;
+		end else if(C1_index == 6'd52) begin
+			mult1 = -16'sd783;
+		end else if(C1_index == 6'd53) begin
+			mult1 = 16'sd1892;
+		end else if(C1_index == 6'd54) begin
+			mult1 = -16'sd1892;
+		end else if(C1_index == 6'd55) begin
+			mult1 = 16'sd783;
+		end else if(C1_index == 6'd56) begin
+			mult1 = 16'sd399;
+		end else if(C1_index == 6'd57) begin
+			mult1 = -16'sd1137;
+		end else if(C1_index == 6'd58) begin
+			mult1 = 16'sd1702;
+		end else if(C1_index == 6'd59) begin
+			mult1 = -16'sd2008;
+		end else if(C1_index == 6'd60) begin
+			mult1 = 16'sd2008;
+		end else if(C1_index == 6'd61) begin
+			mult1 = -16'sd1702;
+		end else if(C1_index == 6'd62) begin
+			mult1 = 16'sd1137;
+		end else if(C1_index == 6'd63) begin
+			mult1 = -16'sd399;
+		end else begin
+			mult1 = 16'sd0;
+		end
+		
+end
+
+
+always_comb begin
+
+		if(CT_flag == 1'b1)begin
+			C2_index = {ROW_INDEX, C_col_i2};
+		end else if( CS_flag == 1'b1)begin
+			C2_index = {ROW_INDEX, C_col_i2};
+		end else begin
+			C2_index = 6'd0;
+		end
+		
+		if(C2_index <= 6'd7) begin
+			mult2 = 16'sd1448;
+		end else if(C2_index == 6'd8) begin
+			mult2 = 16'sd2008;
+		end else if(C2_index == 6'd9) begin
+			mult2 = 16'sd1702;
+		end else if(C2_index == 6'd10) begin
+			mult2 = 16'sd1137;
+		end else if(C2_index == 6'd11) begin
+			mult2 = 16'sd399;
+		end else if(C2_index == 6'd12) begin
+			mult2 = -16'sd399;
+		end else if(C2_index == 6'd13) begin
+			mult2 = -16'sd1137;
+		end else if(C2_index == 6'd14) begin
+			mult2 = -16'sd1702;
+		end else if(C2_index == 6'd15) begin
+			mult2 = -16'sd2008;
+		end else if(C2_index == 6'd16) begin
+			mult2 = 16'sd1892;
+		end else if(C2_index == 6'd17) begin
+			mult2 = 16'sd783;
+		end else if(C2_index == 6'd18) begin
+			mult2 = -16'sd783;
+		end else if(C2_index == 6'd19) begin
+			mult2 = -16'sd1892;
+		end else if(C2_index == 6'd20) begin
+			mult2 = -16'sd1892;
+		end else if(C2_index == 6'd21) begin
+			mult2 = -16'sd783;
+		end else if(C2_index == 6'd22) begin
+			mult2 = 16'sd783;
+		end else if(C2_index == 6'd23) begin
+			mult2 = 16'sd1892;
+		end else if(C2_index == 6'd24) begin
+			mult2 = 16'sd1702;
+		end else if(C2_index == 6'd25) begin
+			mult2 = -16'sd399;
+		end else if(C2_index == 6'd26) begin
+			mult2 = -16'sd2008;
+		end else if(C2_index == 6'd27) begin
+			mult2 = -16'sd1137;
+		end else if(C2_index == 6'd28) begin
+			mult2 = 16'sd1137;
+		end else if(C2_index == 6'd29) begin
+			mult2 = 16'sd2008;
+		end else if(C2_index == 6'd30) begin
+			mult2 = 16'sd399;
+		end else if(C2_index == 6'd31) begin
+			mult2 = -16'sd1702;
+		end else if(C2_index == 6'd32) begin
+			mult2 = 16'sd1448;
+		end else if(C2_index == 6'd33) begin
+			mult2 = -16'sd1448;
+		end else if(C2_index == 6'd34) begin
+			mult2 = -16'sd1448;
+		end else if(C2_index == 6'd35) begin
+			mult2 = 16'sd1448;
+		end else if(C2_index == 6'd36) begin
+			mult2 = 16'sd1448;
+		end else if(C2_index == 6'd37) begin
+			mult2 = -16'sd1448;
+		end else if(C2_index == 6'd38) begin
+			mult2 = -16'sd1448;
+		end else if(C2_index == 6'd39) begin
+			mult2 = 16'sd1448;
+		end else if(C2_index == 6'd40) begin
+			mult2 = 16'sd1137;
+		end else if(C2_index == 6'd41) begin
+			mult2 = -16'sd2008;
+		end else if(C2_index == 6'd42) begin
+			mult2 = 16'sd399;
+		end else if(C2_index == 6'd43) begin
+			mult2 = 16'sd1702;
+		end else if(C2_index == 6'd44) begin
+			mult2 = -16'sd1702;
+		end else if(C2_index == 6'd45) begin
+			mult2 = -16'sd399;
+		end else if(C2_index == 6'd46) begin
+			mult2 = 16'sd2008;
+		end else if(C2_index == 6'd47) begin
+			mult2 = -16'sd1137;
+		end else if(C2_index == 6'd48) begin
+			mult2 = 16'sd783;
+		end else if(C2_index == 6'd49) begin
+			mult2 = -16'sd1892;
+		end else if(C2_index == 6'd50) begin
+			mult2 = 16'sd1892;
+		end else if(C2_index == 6'd51) begin
+			mult2 = -16'sd783;
+		end else if(C2_index == 6'd52) begin
+			mult2 = -16'sd783;
+		end else if(C2_index == 6'd53) begin
+			mult2 = 16'sd1892;
+		end else if(C2_index == 6'd54) begin
+			mult2 = -16'sd1892;
+		end else if(C2_index == 6'd55) begin
+			mult2 = 16'sd783;
+		end else if(C2_index == 6'd56) begin
+			mult2 = 16'd399;
+		end else if(C2_index == 6'd57) begin
+			mult2 = -16'd1137;
+		end else if(C2_index == 6'd58) begin
+			mult2 = 16'd1702;
+		end else if(C2_index == 6'd59) begin
+			mult2 = -16'd2008;
+		end else if(C2_index == 6'd60) begin
+			mult2 = 16'd2008;
+		end else if(C2_index == 6'd61) begin
+			mult2 = -16'd1702;
+		end else if(C2_index == 6'd62) begin
+			mult2 = 16'd1137;
+		end else if(C2_index == 6'd63) begin
+			mult2 = -16'd399;
+		end else begin
+			mult2 = 16'd0;
+		end
+		
+end
+
+always_comb begin
+
+		
+		if(CT_flag == 1'b1)begin
+			C3_index = {ROW_INDEX, C_col_i3};
+		end else if( CS_flag == 1'b1)begin
+			C3_index = {ROW_INDEX,C_col_i3};
+		end else begin
+			C3_index = 6'd0;
+		end
+		
+	
+	
+		if(C3_index <= 6'd7) begin
+			mult3 = 16'sd1448;
+		end else if(C3_index == 6'd8) begin
+			mult3 = 16'sd2008;
+		end else if(C3_index == 6'd9) begin
+			mult3 = 16'sd1702;
+		end else if(C3_index == 6'd10) begin
+			mult3 = 16'sd1137;
+		end else if(C3_index == 6'd11) begin
+			mult3 = 16'sd399;
+		end else if(C3_index == 6'd12) begin
+			mult3 = -16'sd399;
+		end else if(C3_index == 6'd13) begin
+			mult3 = -16'sd1137;
+		end else if(C3_index == 6'd14) begin
+			mult3 = -16'sd1702;
+		end else if(C3_index == 6'd15) begin
+			mult3 = -16'sd2008;
+		end else if(C3_index == 6'd16) begin
+			mult3 = 16'sd1892;
+		end else if(C3_index == 6'd17) begin
+			mult3 = 16'sd783;
+		end else if(C3_index == 6'd18) begin
+			mult3 = -16'sd783;
+		end else if(C3_index == 6'd19) begin
+			mult3 = -16'sd1892;
+		end else if(C3_index == 6'd20) begin
+			mult3 = -16'sd1892;
+		end else if(C3_index == 6'd21) begin
+			mult3 = -16'sd783;
+		end else if(C3_index == 6'd22) begin
+			mult3 = 16'sd783;
+		end else if(C3_index == 6'd23) begin
+			mult3 = 16'sd1892;
+		end else if(C3_index == 6'd24) begin
+			mult3 = 16'sd1702;
+		end else if(C3_index == 6'd25) begin
+			mult3 = -16'sd399;
+		end else if(C3_index == 6'd26) begin
+			mult3 = -16'sd2008;
+		end else if(C3_index == 6'd27) begin
+			mult3 = -16'sd1137;
+		end else if(C3_index == 6'd28) begin
+			mult3 = 16'sd1137;
+		end else if(C3_index == 6'd29) begin
+			mult3 = 16'sd2008;
+		end else if(C3_index == 6'd30) begin
+			mult3 = 16'sd399;
+		end else if(C3_index == 6'd31) begin
+			mult3 = -16'sd1702;
+		end else if(C3_index == 6'd32) begin
+			mult3 = 16'sd1448;
+		end else if(C3_index == 6'd33) begin
+			mult3 = -16'sd1448;
+		end else if(C3_index == 6'd34) begin
+			mult3 = -16'sd1448;
+		end else if(C3_index == 6'd35) begin
+			mult3 = 16'sd1448;
+		end else if(C3_index == 6'd36) begin
+			mult3 = 16'sd1448;
+		end else if(C3_index == 6'd37) begin
+			mult3 = -16'sd1448;
+		end else if(C3_index == 6'd38) begin
+			mult3 = -16'sd1448;
+		end else if(C3_index == 6'd39) begin
+			mult3 = 16'sd1448;
+		end else if(C3_index == 6'd40) begin
+			mult3 = 16'sd1137;
+		end else if(C3_index == 6'd41) begin
+			mult3 = -16'sd2008;
+		end else if(C3_index == 6'd42) begin
+			mult3 = 16'sd399;
+		end else if(C3_index == 6'd43) begin
+			mult3 = 16'sd1702;
+		end else if(C3_index == 6'd44) begin
+			mult3 = -16'sd1702;
+		end else if(C3_index == 6'd45) begin
+			mult3 = -16'sd399;
+		end else if(C3_index == 6'd46) begin
+			mult3 = 16'sd2008;
+		end else if(C3_index == 6'd47) begin
+			mult3 = -16'sd1137;
+		end else if(C3_index == 6'd48) begin
+			mult3 = 16'sd783;
+		end else if(C3_index == 6'd49) begin
+			mult3 = -16'sd1892;
+		end else if(C3_index == 6'd50) begin
+			mult3 = 16'sd1892;
+		end else if(C3_index == 6'd51) begin
+			mult3 = -16'sd783;
+		end else if(C3_index == 6'd52) begin
+			mult3 = -16'sd783;
+		end else if(C3_index == 6'd53) begin
+			mult3 = 16'sd1892;
+		end else if(C3_index == 6'd54) begin
+			mult3 = -16'sd1892;
+		end else if(C3_index == 6'd55) begin
+			mult3 = 16'sd783;
+		end else if(C3_index == 6'd56) begin
+			mult3 = 16'sd399;
+		end else if(C3_index == 6'd57) begin
+			mult3 = -16'sd1137;
+		end else if(C3_index == 6'd58) begin
+			mult3 = 16'sd1702;
+		end else if(C3_index == 6'd59) begin
+			mult3 = -16'sd2008;
+		end else if(C3_index == 6'd60) begin
+			mult3 = 16'sd2008;
+		end else if(C3_index == 6'd61) begin
+			mult3 = -16'sd1702;
+		end else if(C3_index == 6'd62) begin
+			mult3 = 16'sd1137;
+		end else if(C3_index == 6'd63) begin
+			mult3 = -16'sd399;
+		end else begin
+			mult3 = 16'sd0;
+		end
+end
+
+
+always_comb begin
+		
+		if(CT_flag == 1'b1)begin
+			C4_index = {ROW_INDEX, C_col_i4};
+		end else if( CS_flag == 1'b1)begin
+			C4_index = {ROW_INDEX, C_col_i4};
+		end else begin
+			C4_index = 6'd0;
+		end
+		
+
+		
+		if(C4_index <= 6'd7) begin
+			mult4 = 16'sd1448;
+		end else if(C4_index == 6'd8) begin
+			mult4 = 16'sd2008;
+		end else if(C4_index == 6'd9) begin
+			mult4 = 16'sd1702;
+		end else if(C4_index == 6'd10) begin
+			mult4 = 16'sd1137;
+		end else if(C4_index == 6'd11) begin
+			mult4 = 16'sd399;
+		end else if(C4_index == 6'd12) begin
+			mult4 = -16'sd399;
+		end else if(C4_index == 6'd13) begin
+			mult4 = -16'sd1137;
+		end else if(C4_index == 6'd14) begin
+			mult4 = -16'sd1702;
+		end else if(C4_index == 6'd15) begin
+			mult4 = -16'sd2008;
+		end else if(C4_index == 6'd16) begin
+			mult4 = 16'sd1892;
+		end else if(C4_index == 6'd17) begin
+			mult4 = 16'sd783;
+		end else if(C4_index == 6'd18) begin
+			mult4 = -16'sd783;
+		end else if(C4_index == 6'd19) begin
+			mult4 = -16'sd1892;
+		end else if(C4_index == 6'd20) begin
+			mult4 = -16'sd1892;
+		end else if(C4_index == 6'd21) begin
+			mult4 = -16'sd783;
+		end else if(C4_index == 6'd22) begin
+			mult4 = 16'sd783;
+		end else if(C4_index == 6'd23) begin
+			mult4 = 16'sd1892;
+		end else if(C4_index == 6'd24) begin
+			mult4 = 16'sd1702;
+		end else if(C4_index == 6'd25) begin
+			mult4 = -16'sd399;
+		end else if(C4_index == 6'd26) begin
+			mult4 = -16'sd2008;
+		end else if(C4_index == 6'd27) begin
+			mult4 = -16'sd1137;
+		end else if(C4_index == 6'd28) begin
+			mult4 = 16'sd1137;
+		end else if(C4_index == 6'd29) begin
+			mult4 = 16'sd2008;
+		end else if(C4_index == 6'd30) begin
+			mult4 = 16'sd399;
+		end else if(C4_index == 6'd31) begin
+			mult4 = -16'sd1702;
+		end else if(C4_index == 6'd32) begin
+			mult4 = 16'sd1448;
+		end else if(C4_index == 6'd33) begin
+			mult4 = -16'sd1448;
+		end else if(C4_index == 6'd34) begin
+			mult4 = -16'sd1448;
+		end else if(C4_index == 6'd35) begin
+			mult4 = 16'sd1448;
+		end else if(C4_index == 6'd36) begin
+			mult4 = 16'sd1448;
+		end else if(C4_index == 6'd37) begin
+			mult4 = -16'sd1448;
+		end else if(C4_index == 6'd38) begin
+			mult4 = -16'sd1448;
+		end else if(C4_index == 6'd39) begin
+			mult4 = 16'sd1448;
+		end else if(C4_index == 6'd40) begin
+			mult4 = 16'sd1137;
+		end else if(C4_index == 6'd41) begin
+			mult4 = -16'sd2008;
+		end else if(C4_index == 6'd42) begin
+			mult4 = 16'sd399;
+		end else if(C4_index == 6'd43) begin
+			mult4 = 16'sd1702;
+		end else if(C4_index == 6'd44) begin
+			mult4 = -16'sd1702;
+		end else if(C4_index == 6'd45) begin
+			mult4 = -16'sd399;
+		end else if(C4_index == 6'd46) begin
+			mult4 = 16'sd2008;
+		end else if(C4_index == 6'd47) begin
+			mult4 = -16'sd1137;
+		end else if(C4_index == 6'd48) begin
+			mult4 = 16'sd783;
+		end else if(C4_index == 6'd49) begin
+			mult4 = -16'sd1892;
+		end else if(C4_index == 6'd50) begin
+			mult4 = 16'sd1892;
+		end else if(C4_index == 6'd51) begin
+			mult4 = -16'sd783;
+		end else if(C4_index == 6'd52) begin
+			mult4 = -16'sd783;
+		end else if(C4_index == 6'd53) begin
+			mult4 = 16'sd1892;
+		end else if(C4_index == 6'd54) begin
+			mult4 = -16'sd1892;
+		end else if(C4_index == 6'd55) begin
+			mult4 = 16'sd783;
+		end else if(C4_index == 6'd56) begin
+			mult4 = 16'sd399;
+		end else if(C4_index == 6'd57) begin
+			mult4 = -16'sd1137;
+		end else if(C4_index == 6'd58) begin
+			mult4 = 16'sd1702;
+		end else if(C4_index == 6'd59) begin
+			mult4 = -16'sd2008;
+		end else if(C4_index == 6'd60) begin
+			mult4 = 16'sd2008;
+		end else if(C4_index == 6'd61) begin
+			mult4 = -16'sd1702;
+		end else if(C4_index == 6'd62) begin
+			mult4 = 16'sd1137;
+		end else if(C4_index == 6'd63) begin
+			mult4 = -16'sd399;
+		end else begin
+			mult4 = 16'sd0;
+		end
+		
+end
+
+		
+endmodule
